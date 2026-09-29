@@ -1,0 +1,164 @@
+# Pronunciations for Kokoro's American English voices (language code `a`).
+#
+# src/pgvideo/speech.py turns a script sentence's display text into the text
+# Kokoro speaks. The screen and the captions keep the canonical spelling. The
+# storyboard records this file's SHA-256, so narration is regenerated when it
+# changes.
+#
+# terms:          whole words or identifiers, matched case-sensitively.
+# parts:          pieces of snake_case and CamelCase identifiers, matched
+#                 case-insensitively after the identifier is split.
+# abbreviations:  prose abbreviations, matched exactly.
+# units:          units after a number, such as `128MB` or `8 kB`.
+#
+# Unlisted identifier pieces are read as words. A piece without a vowel, or an
+# all-capital piece of three letters or fewer, is spelled letter by letter.
+schema: 1
+language: a
+
+terms:
+  PostgreSQL: Postgres Q L
+  Postgres: Postgres
+  postgres: postgres
+  psql: P S Q L
+  SQL: S Q L
+  GUC: G U C
+  WAL: wall
+  MVCC: M V C C
+  OID: O I D
+  XID: X I D
+  LSN: L S N
+  TID: T I D
+  SLRU: S L R U
+  TOAST: toast
+  HOT: hot
+  JIT: jit
+  AIO: A I O
+  I/O: I O
+  IO: I O
+  CPU: C P U
+  API: A P I
+  ASCII: ask-ee
+  UTF-8: U T F 8
+  JSON: jason
+  JSONB: jason B
+  TAP: tap
+  "NULL": "null"
+  CTE: C T E
+  DDL: D D L
+  DML: D M L
+  LRU: L R U
+  OS: O S
+  PID: P I D
+  pid: P I D
+  TCP: T C P
+  SSL: S S L
+  TLS: T L S
+  CIC: C I C
+  RIC: R I C
+  Kokoro: Kokoro
+  GitHub: git hub
+  contrib: con-trib
+  sysv: sys V
+  pgstat: P G stat
+  walsender: wall sender
+  walreceiver: wall receiver
+  autovacuum: auto-vacuum
+  bgwriter: B G writer
+  multixact: multi-ex-act
+  shmem: shared mem
+
+parts:
+  pg: P G
+  pgstat: P G stat
+  pgss: P G S S
+  guc: G U C
+  gucs: G U Cs
+  wal: wall
+  xlog: X log
+  xact: ex-act
+  xid: X I D
+  xids: X I Ds
+  lsn: L S N
+  oid: O I D
+  tid: T I D
+  mb: M B
+  shmem: shared mem
+  cmd: command
+  str: string
+  buf: buffer
+  bufs: buffers
+  ptr: pointer
+  ctx: context
+  len: len
+  cliplen: clip len
+  mbcliplen: M B clip len
+  postgresql: Postgres Q L
+  qtext: Q text
+  sourcetext: source text
+  fsync: F sync
+  procs: procs
+  proc: proc
+  num: num
+  st: S T
+  io: I O
+  aio: A I O
+  spi: S P I
+  mvcc: M V C C
+  slru: S L R U
+  toast: toast
+  jit: jit
+  bgworker: B G worker
+  bgwriter: B G writer
+  walsender: wall sender
+  walreceiver: wall receiver
+  autovac: auto-vac
+  autovacuum: auto-vacuum
+  userid: user I D
+  dbid: D B I D
+  queryid: query I D
+  id: I D
+  ids: I Ds
+  sql: S Q L
+  http: H T T P
+  utf8: U T F 8
+  plpgsql: P L P G S Q L
+  datname: dat name
+  relname: rel name
+  nspname: namespace name
+  relid: rel I D
+  idx: index
+  tup: tup
+  tuple: tuple
+  tuples: tuples
+  blk: block
+  blks: blocks
+  dat: dat
+  sgml: S G M L
+
+abbreviations:
+  e.g.: for example
+  i.e.: that is
+  etc.: and so on
+  vs.: versus
+  vs: versus
+  approx.: approximately
+  cf.: compare
+
+units:
+  B: bytes
+  kB: kilobytes
+  KB: kilobytes
+  KiB: kibibytes
+  MB: megabytes
+  MiB: mebibytes
+  GB: gigabytes
+  GiB: gibibytes
+  TB: terabytes
+  ms: milliseconds
+  us: microseconds
+  µs: microseconds
+  s: seconds
+  min: minutes
+  h: hours
+  d: days

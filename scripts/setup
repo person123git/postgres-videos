@@ -1,0 +1,63 @@
+#!/bin/sh
+set -eu
+
+# Locate this script without tools from the inherited PATH.
+case $0 in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+script_dir=$(CDPATH= cd -- "$script_dir" && pwd -P)
+project_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
+unset PGVIDEO_ENV_READY PGVIDEO_LOCAL_ENV PGVIDEO_SANDBOX
+cd "$project_root"
+
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != --offline ]; }; then
+    echo 'setup: usage: scripts/setup [--offline]' >&2
+    exit 2
+fi
+
+for path in .runtime .runtime/python .runtime/python/bin .runtime/python/bin/python3.11 \
+    .venv .venv/bin .venv/bin/python cache cache/downloads cache/wheels; do
+    if [ -L "$path" ]; then
+        echo "setup: $path must not be a symlink" >&2
+        exit 1
+    fi
+done
+for path in .runtime .runtime/python .runtime/python/bin .venv .venv/bin cache cache/downloads cache/wheels; do
+    if [ -e "$path" ] && [ ! -d "$path" ]; then
+        echo "setup: $path must be a directory" >&2
+        exit 1
+    fi
+done
+/bin/mkdir -p .runtime/python .runtime/home .runtime/tmp cache/downloads cache/wheels
+
+runtime_archive=cache/downloads/cpython-3.11.16-20260924-aarch64-apple-darwin.tar.gz
+runtime_url='https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only.tar.gz'
+runtime_sha='d718e3c5c6f4b225ed25f88bf65e4c5d314e0dea0d716ea50bc9d038630c502b'
+
+if [ "$(/usr/bin/uname -s)" != Darwin ] || [ "$(/usr/bin/uname -m)" != arm64 ]; then
+    echo 'setup: this lock supports macOS arm64 only' >&2
+    exit 1
+fi
+if [ ! -f "$runtime_archive" ]; then
+    if [ "${1:-}" = --offline ]; then
+        echo "setup: offline setup needs $runtime_archive" >&2
+        exit 1
+    fi
+    HOME="$project_root/.runtime/home" TMPDIR="$project_root/.runtime/tmp" \
+        /usr/bin/curl -q -fL --retry 3 "$runtime_url" -o "$runtime_archive"
+fi
+if ! printf '%s  %s\n' "$runtime_sha" "$runtime_archive" | /usr/bin/shasum -a 256 -c -; then
+    echo 'setup: local Python archive checksum differs from tools.lock' >&2
+    exit 1
+fi
+if [ ! -x .runtime/python/bin/python3.11 ]; then
+    /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/tar -xzf "$runtime_archive" -C .runtime/python --strip-components=1
+fi
+if [ ! -x .venv/bin/python ]; then
+    HOME="$project_root/.runtime/home" TMPDIR="$project_root/.runtime/tmp" \
+        .runtime/python/bin/python3.11 -I -m venv --copies .venv
+fi
+# Install inside the networked sandbox, then prove the result works offline.
+.venv/bin/python -I scripts/environment.py setup "$@"
+exec .venv/bin/python -I scripts/environment.py doctor --sample

@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+# Locate this script without tools from the inherited PATH.
+case $0 in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+script_dir=$(CDPATH= cd -- "$script_dir" && pwd -P)
+project_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
+unset PGVIDEO_ENV_READY PGVIDEO_LOCAL_ENV PGVIDEO_SANDBOX
+for path in .venv .venv/bin .venv/bin/python .runtime cache; do
+    if [ -L "$project_root/$path" ]; then
+        echo "pgvideo: $path must not be a symlink" >&2
+        exit 1
+    fi
+done
+if [ ! -x "$project_root/.venv/bin/python" ]; then
+    echo 'pgvideo: local environment is missing; run scripts/setup' >&2
+    exit 1
+fi
+exec "$project_root/.venv/bin/python" -I "$project_root/scripts/environment.py" "$@"

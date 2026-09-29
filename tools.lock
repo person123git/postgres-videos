@@ -1,0 +1,78 @@
+{
+  "platform": {"system": "Darwin", "architecture": "arm64", "python_abi": "cp311", "minimum_macos": "14.0"},
+  "python": {
+    "version": "3.11.16",
+    "release": "20260924",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only.tar.gz",
+    "sha256": "d718e3c5c6f4b225ed25f88bf65e4c5d314e0dea0d716ea50bc9d038630c502b",
+    "archive": "cache/downloads/cpython-3.11.16-20260924-aarch64-apple-darwin.tar.gz",
+    "executable": ".runtime/python/bin/python3.11",
+    "executable_sha256": "f6eedb649c0655db7a957280b49cd5df593c86053aed61ee770935d48b580f45",
+    "shared_library": ".runtime/python/lib/libpython3.11.dylib",
+    "shared_library_sha256": "edebe2287a190e3250adaf690fbec660df037e7972f205a106437b0b2419ed23"
+  },
+  "python_wheels": {"index_url": "https://pypi.org/simple", "lockfile": "requirements.lock", "wheelhouse": "cache/wheels"},
+  "spacy_model": {
+    "version": "3.8.0",
+    "url": "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "sha256": "1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+    "path": "cache/wheels/en_core_web_sm-3.8.0-py3-none-any.whl"
+  },
+  "ffmpeg": {
+    "version": "9.0.2",
+    "build": "1789931890_9.0.2",
+    "ffmpeg": {
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
+      "sha256": "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
+      "archive": "cache/downloads/mr-ffmpeg.zip",
+      "executable": ".runtime/bin/ffmpeg",
+      "binary_sha256": "2e11c6f90993cdb79fff84d3f90044d28316b310e75b3e030cfc9a54f2c9d384"
+    },
+    "ffprobe": {
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+      "sha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
+      "archive": "cache/downloads/mr-ffprobe.zip",
+      "executable": ".runtime/bin/ffprobe",
+      "binary_sha256": "2738aa46a7f9acbc8ab09a6715554c90f7de603171ac403726765685df6a0059"
+    }
+  },
+  "espeak_ng": {
+    "version": "1.52.0",
+    "source_wheel": "espeakng_loader-0.2.4-py3-none-macosx_11_0_arm64.whl",
+    "source_sha256": "d27cdca31112226e7299d8562e889d3e38a1e48055c9ee381b45d669072ee59f",
+    "library": ".runtime/lib/libespeak-ng.dylib",
+    "library_sha256": "bb635eee1ee9c456f4a5cf06fb6cb352ecdd4d61e1951743b423ef22bb57f470",
+    "executable": ".runtime/bin/espeak-ng",
+    "executable_type": "project-local CLI for the pinned native library",
+    "data": ".runtime/share/espeak-ng-data",
+    "data_tree_sha256": "16279acc1d4559aac2bf47df243035dc88384f01f652d5ab8bde37786aeda43c"
+  },
+  "browser": {
+    "playwright_version": "1.63.0",
+    "chromium_version": "153.0.8010.12",
+    "revision": "1243",
+    "headless_shell": {
+      "url": "https://cdn.playwright.dev/builds/cft/153.0.8010.12/mac-arm64/chrome-headless-shell-mac-arm64.zip",
+      "sha256": "89d80a6d26ccd0ccfd51e22d9e1297283862af2b0cd91dce07459b35ca0059f2",
+      "archive": "cache/downloads/chrome-headless-shell-mac-arm64-153.0.8010.12.zip",
+      "root": ".runtime/browsers/chromium_headless_shell-1243",
+      "markers": ["INSTALLATION_COMPLETE", "DEPENDENCIES_VALIDATED"],
+      "binary": ".runtime/browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+      "binary_sha256": "a0bfe7b4da4787b66058477d696cd1d09065d25f06a548947722b9af77ee8282",
+      "tree_sha256": "6091601c86cf5f8bb2e8e012c21b5633b71c3bb6e9d8e2232392beb11b8b6580"
+    }
+  },
+  "kokoro": {
+    "repository": "hexgrad/Kokoro-82M",
+    "revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+    "config": {"url": "https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/config.json", "path": "cache/models/kokoro/config.json", "sha256": "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f"},
+    "model": {"url": "https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/kokoro-v1_0.pth", "path": "cache/models/kokoro/kokoro-v1_0.pth", "sha256": "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"},
+    "voice": {"name": "af_heart", "url": "https://huggingface.co/hexgrad/Kokoro-82M/resolve/f3ff3571791e39611d31c381e3a41a3af07b4987/voices/af_heart.pt", "path": "cache/models/kokoro/voices/af_heart.pt", "sha256": "0ab5709b8ffab19bfd849cd11d98f75b60af7733253ad0d67b12382a102cb4ff"}
+  },
+  "fonts": {
+    "repository": "google/fonts",
+    "revision": "23e54b51ddffbc7713c583748e3bd86f62b1fa4a",
+    "inter": {"url": "https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf", "path": "assets/fonts/Inter.ttf", "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"},
+    "noto_sans_mono": {"url": "https://raw.githubusercontent.com/google/fonts/23e54b51ddffbc7713c583748e3bd86f62b1fa4a/ofl/notosansmono/NotoSansMono%5Bwdth%2Cwght%5D.ttf", "path": "assets/fonts/NotoSansMono.ttf", "sha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081"}
+  }
+}

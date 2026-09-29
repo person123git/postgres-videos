@@ -1,0 +1,14 @@
+# Direct runtime and development requirements for macOS arm64 / CPython 3.11.
+# requirements.lock records every resolved wheel and its SHA-256 digest.
+kokoro==0.9.4
+soundfile==0.14.0
+torch==2.14.0
+playwright==1.63.0
+markdown-it-py==4.0.0
+PyYAML==6.0.3
+Jinja2==3.1.6
+espeakng-loader==0.2.4
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+setuptools==79.0.1
+wheel==0.45.1
+pip==24.0
