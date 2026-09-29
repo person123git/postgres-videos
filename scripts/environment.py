@@ -52,7 +52,8 @@ PASSTHROUGH = ("GITHUB_TOKEN", "HF_TOKEN", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROX
                "https_proxy", "http_proxy", "no_proxy")
 
 # Commands that download; every other command, and setup --offline, runs with IP networking denied.
-NETWORK_COMMANDS = {"setup", "generate"}
+# Model inference is the external harness's job; no pgvideo command calls a model or carries its credentials.
+NETWORK_COMMANDS = {"setup", "prepare"}
 # Operating system locations a sandboxed command may use besides the project.
 # Seatbelt matches canonical paths, so /etc and /tmp appear as /private/...
 OS_READS = (
@@ -895,7 +896,8 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
             "writing " + ", ".join(description for _, description in OS_WRITES),
             "running " + ", ".join(OS_EXECUTABLES) + " for the launcher scripts",
             "system services reached over Mach IPC, such as DNS, proxy settings, and fonts",
-            "network access for setup and generate: GitHub, PyPI, Hugging Face, the Playwright CDN, and the FFmpeg build host",
+            "network access for setup and prepare: GitHub, PyPI, Hugging Face, the Playwright CDN, and the FFmpeg "
+            "build host",
             "bootstrap before the sandbox starts: " + ", ".join(BOOTSTRAP_TOOLS),
             "the platform null device for PIP_CONFIG_FILE and OPENSSL_CONF",
         ],
@@ -907,7 +909,7 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
             "project and the paths above, or opening an IP connection; only the attempts listed in "
             "isolation.audit.denied_without_termination are denied without terminating.",
             "The audit does not cover metadata lookups, Mach IPC, the bootstrap in scripts/setup, or the network "
-            "retrieval of setup and generate.",
+            "retrieval of setup and prepare.",
             "scripts/setup downloads, verifies, and unpacks the Python runtime and creates .venv before the sandbox applies.",
             "sandbox-exec is deprecated by Apple; if it is removed, commands fail instead of running unconfined.",
         ],
@@ -924,8 +926,8 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
 
 def main() -> int:
     if not sys.argv[1:]:
-        raise EnvironmentError("use scripts/pgvideo doctor, test, audit, generate --document ..., "
-                               "resume --request ..., or script --request ...")
+        raise EnvironmentError("use scripts/pgvideo doctor, test, audit, prepare --document ..., "
+                               "status --request ..., or another command in AGENTS.md")
     create_directories()
     restart_clean(sys.argv[1])
     lock = read_lock()

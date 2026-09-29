@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pgvideo.invalid/schemas/review.schema.json",
+  "title": "pgvideo semantic content review, version 1",
+  "description": "A separate review of one accepted storyboard against the original evidence, made without the writer's self-assessment. It has one finding for every target that `pgvideo status` lists: each narration item, screen line, diagram edge, and manually written TTS text. pgvideo checks that coverage, resolves every evidence ID, and decides the content gate; the reviewer's words are findings, never statuses.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "request_id", "storyboard_digest", "plan_digest", "evidence_digest", "reviewer", "producer",
+               "findings", "editorial", "summary"],
+  "properties": {
+    "schema": {"const": "pgvideo/review/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "storyboard_digest": {"$ref": "plan.schema.json#/$defs/digest"},
+    "plan_digest": {"$ref": "plan.schema.json#/$defs/digest"},
+    "evidence_digest": {"$ref": "plan.schema.json#/$defs/digest"},
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["separation", "writer_context_shared", "writer_self_assessment_seen"],
+      "properties": {
+        "separation": {"enum": ["fresh_context", "separate_session", "different_model"],
+                       "description": "How the review was kept apart from the writing pass"},
+        "writer_context_shared": {"type": "boolean"},
+        "writer_self_assessment_seen": {"type": "boolean"}
+      }
+    },
+    "producer": {"$ref": "plan.schema.json#/$defs/producer"},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "editorial": {"type": "array", "items": {"$ref": "#/$defs/editorial"}},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 2000}
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "factual", "verdict", "evidence", "justification", "issues"],
+      "properties": {
+        "target": {"type": "string", "pattern": "^(narration|screen|edge|tts):[a-z0-9][a-z0-9.-]*(:[0-9]+)?$"},
+        "factual": {"type": "boolean", "description": "Whether the target states technical content, judged independently of its origin label"},
+        "verdict": {"enum": ["supported", "contradicted", "insufficient_evidence", "not_factual"]},
+        "evidence": {"type": "array", "items": {"$ref": "plan.schema.json#/$defs/reference"}},
+        "justification": {"type": "string", "minLength": 1, "maxLength": 600},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}}
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": {"enum": ["contradiction", "unsupported", "dropped_qualification", "changed_condition", "wrong_scope",
+                          "wrong_direction", "wrong_causality", "invented_number", "invented_example",
+                          "glossary_mismatch", "tts_mismatch", "framing_claim", "other"]},
+        "severity": {"enum": ["material", "minor"]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 400}
+      }
+    },
+    "editorial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scene", "code", "severity", "message"],
+      "properties": {
+        "scene": {"type": "string", "minLength": 1},
+        "code": {"enum": ["clarity", "missing_caveat", "repetition", "visual_mismatch", "ordering", "terminology",
+                          "pacing", "other"]},
+        "severity": {"enum": ["material", "minor"]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 400}
+      }
+    }
+  }
+}

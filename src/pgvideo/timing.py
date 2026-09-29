@@ -10,6 +10,7 @@ from pathlib import Path
 
 import soundfile as sf
 
+from .orchestration import require_content_gate, require_duration
 from .reuse import stage_fingerprint
 from .sources import write_atomic
 from .stages import invalidate_after
@@ -75,6 +76,8 @@ def _create_timing(root: Path, run_dir: Path) -> dict:
     script = manifest.get("script") or {}
     if narration.get("status") != "passed" or script.get("status") != "passed":
         raise ValueError("The script and narration must pass before timing")
+    require_content_gate(run_dir, manifest)
+    require_duration(run_dir, manifest)
     map_path = run_dir / "narration/audio-map.json"
     storyboard_path = run_dir / "storyboard.json"
     master_path = run_dir / "narration/master.wav"

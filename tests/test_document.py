@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pgvideo.cli import NEEDS_REVIEW, generate, parser
+from pgvideo.cli import NEEDS_REVIEW, parser, prepare
 from pgvideo.document import (SUMMARY_TARGET_MINUTES, TARGET_MINUTES, WORDS_PER_MINUTE, _leaves, _quantities,
                               _summary_words, parse_document)
 from pgvideo.markdown import block_tree
@@ -493,7 +493,7 @@ class DocumentTests(unittest.TestCase):
             parse_document(self.workspace, run_dir)
         self.assertFalse((run_dir / "document.json").exists())
 
-    def test_generate_command_writes_the_coverage_map(self):
+    def test_prepare_command_writes_the_coverage_map(self):
         self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=TEXT), refs=["master"])
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
         self.enterContext(patch("pgvideo.cli.local_selection"))
@@ -501,12 +501,12 @@ class DocumentTests(unittest.TestCase):
         self.enterContext(patch("pgvideo.sources._github_contents",
                                 side_effect=lambda path, ref: {"type": "file", "path": path}))
         install_project_files(self.workspace)
-        args = parser().parse_args(["generate", "--document", DOCUMENT])
+        args = parser().parse_args(["prepare", "--document", DOCUMENT])
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            self.assertEqual(generate(args, self.workspace), 0)
+            self.assertEqual(prepare(args, self.workspace), 0, stderr.getvalue())
         self.assertIn("Coverage map:", stdout.getvalue())
-        self.assertIn("Storyboard:", stdout.getvalue())
+        self.assertIn("Evidence packet:", stdout.getvalue())
         (run_dir,) = (self.workspace / "runs").iterdir()
         self.assertTrue((run_dir / "document.json").is_file())
 
@@ -515,8 +515,8 @@ class DocumentTests(unittest.TestCase):
             refs=["master"])
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            self.assertEqual(generate(args, self.workspace), NEEDS_REVIEW)
-        self.assertIn("blocking issue(s) in the coverage map", stderr.getvalue())
+            self.assertEqual(prepare(args, self.workspace), NEEDS_REVIEW)
+        self.assertRegex(stderr.getvalue(), r"blocking issue\(s\) in .*coverage\.md")
 
 
 class QuantityTests(unittest.TestCase):

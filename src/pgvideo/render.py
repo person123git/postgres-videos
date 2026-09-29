@@ -14,6 +14,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup, escape
 from playwright.sync_api import sync_playwright
 
+from .orchestration import require_content_gate
 from .paths import project_directory
 from .reuse import stage_fingerprint
 from .sources import write_atomic
@@ -168,6 +169,7 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: in
         timing_stage, script_stage = manifest.get("timing") or {}, manifest.get("script") or {}
         if timing_stage.get("status") != "passed" or script_stage.get("status") != "passed":
             raise ValueError("Script and timing must pass before rendering")
+        require_content_gate(run_dir, manifest)
         timeline_path, storyboard_path = run_dir / "timeline.json", run_dir / "storyboard.json"
         if _sha(timeline_path) != timing_stage["sha256"] or _sha(storyboard_path) != script_stage["sha256"]:
             raise ValueError("Storyboard or timeline changed after validation; rerun timing")

@@ -2,7 +2,7 @@
 
 tests/fixtures/wiki/ is served as the wiki repository at one commit, and
 tests/fixtures/postgres/ as the PostgreSQL source at the pages' pinned commit. Each
-page under wiki/v18/checks/ exercises one case through `generate`: request
+page under wiki/v18/checks/ exercises one case through `prepare`: request
 validation, a consistent page, an alias that two glossary entries claim, a central
 term that neither the glossary nor the evidence supports, a default that contradicts
 the glossary, the same default settled by the pinned source, an entry that the
@@ -18,7 +18,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pgvideo.cli import NEEDS_REVIEW, generate, parser
+from pgvideo.cli import NEEDS_REVIEW, parser, prepare
+from pgvideo.script import create_baseline
 from test_sources import PIN, POSTGRES, PROJECT_ROOT, WIKI, WIKI_COMMIT, FakeGitHub, install_project_files
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -60,10 +61,10 @@ class FixtureChecks(unittest.TestCase):
             return [{"type": "file", "path": name} for name in self.wiki if name.startswith(path + "/")]
         return None
 
-    def generate(self, document, *options):
+    def prepare(self, document, *options):
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            status = generate(parser().parse_args(["generate", "--document", document, *options]), self.workspace)
+            status = prepare(parser().parse_args(["prepare", "--document", document, *options]), self.workspace)
         run_dir = next((Path(line.removeprefix("Validated request: ")).parent
                         for line in stdout.getvalue().splitlines() if line.startswith("Validated request: ")), None)
         return status, stderr.getvalue(), run_dir
@@ -91,7 +92,7 @@ class FixtureChecks(unittest.TestCase):
         ]
         for (document, *options), message in cases:
             with self.subTest(document=document, options=options):
-                status, stderr, run_dir = self.generate(document, *options)
+                status, stderr, run_dir = self.prepare(document, *options)
                 self.assertEqual(status, 1)
                 self.assertIn(message, stderr)
                 self.assertIsNone(run_dir)
@@ -99,19 +100,20 @@ class FixtureChecks(unittest.TestCase):
         self.assertFalse((self.workspace.parent / "outside").exists())
         self.narrate.assert_not_called()
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-            parser().parse_args(["generate", "--document", f"{CHECKS}/consistent.md", "--width", "1919"])
+            parser().parse_args(["prepare", "--document", f"{CHECKS}/consistent.md", "--width", "1919"])
 
-    def test_consistent_page_reaches_narration_from_a_path_or_a_blob_url(self):
+    def test_consistent_page_reaches_the_evidence_packet_from_a_path_or_a_blob_url(self):
+        stages = ("sources", "document", "glossary", "glossary_check", "evidence")
         for document in (f"{CHECKS}/consistent.md", f"{BLOB}/consistent.md"):
             with self.subTest(document=document):
-                status, stderr, run_dir = self.generate(document)
+                status, stderr, run_dir = self.prepare(document)
                 self.assertEqual(status, 0, stderr)
-                self.assertEqual(self.narrate.call_args.args[1], run_dir)
                 manifest = self.manifest(run_dir)
-                self.assertEqual({stage: manifest[stage]["status"] for stage in
-                                  ("sources", "document", "glossary", "glossary_check", "script")},
-                                 dict.fromkeys(("sources", "document", "glossary", "glossary_check", "script"),
-                                               "passed"))
+                self.assertEqual({stage: manifest[stage]["status"] for stage in stages},
+                                 dict.fromkeys(stages, "passed"))
+                # The harness writes the content; prepare stops before it.
+                self.assertFalse({"plan", "script"} & set(manifest))
+                self.narrate.assert_not_called()
                 results = {r["id"]: r["result"] for r in self.record(run_dir, "glossary-check.json")["results"]}
                 # "PostgreSQL 18 has no slot scanner" agrees with the entry's Not present note.
                 self.assertEqual((results["entry:example_size"], results["entry:slot-scanner"]),
@@ -127,7 +129,7 @@ class FixtureChecks(unittest.TestCase):
         }
         for page, (stage, expected) in cases.items():
             with self.subTest(page=page):
-                status, stderr, run_dir = self.generate(f"{CHECKS}/{page}.md")
+                status, stderr, run_dir = self.prepare(f"{CHECKS}/{page}.md")
                 self.assertEqual(status, NEEDS_REVIEW, stderr)
                 manifest = self.manifest(run_dir)
                 self.assertEqual((manifest["status"], manifest[stage]["status"]), ("needs_review", "needs_review"))
@@ -143,13 +145,17 @@ class FixtureChecks(unittest.TestCase):
         self.narrate.assert_not_called()
 
     def test_the_pinned_source_settles_a_contradictory_default(self):
-        status, stderr, run_dir = self.generate(f"{CHECKS}/corrected-default.md")
+        status, stderr, run_dir = self.prepare(f"{CHECKS}/corrected-default.md")
         self.assertEqual(status, 0, stderr)
         check = self.record(run_dir, "glossary-check.json")
         (correction,) = check["corrections"]
         self.assertEqual((correction["setting"], correction["corrected"], correction["source"]),
                          ("example_size", "1024 bytes", "pinned_source"))
-        narration = [item["text"] for scene in self.record(run_dir, "storyboard.json")["scenes"]
+        # The evidence packet hands the correction to the harness; the extractive baseline applies it.
+        packet = self.record(run_dir, "evidence-packet.json")
+        self.assertEqual([c["id"] for c in packet["review_state"]["corrections"]], [correction["id"]])
+        create_baseline(self.workspace, run_dir)
+        narration = [item["text"] for scene in self.record(run_dir, "baseline/storyboard.json")["scenes"]
                      for item in scene["narration"]]
         self.assertTrue(any("`example_size`" in text and "1024 bytes" in text for text in narration), narration)
         self.assertFalse(any("2048" in text for text in narration))

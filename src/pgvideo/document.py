@@ -31,7 +31,7 @@ from .sources import POSTGRES_REPOSITORY, blob_url, write_atomic
 from .stages import invalidate_after
 
 SCHEMA_VERSION = 1
-# How much of the page a request narrates (`generate --detail`). A summary keeps the key points, the
+# How much of the page a request narrates (`prepare --detail`). A summary keeps the key points, the
 # standard level condenses pages that exceed its target, and full detail narrates every section.
 DETAILS = ("summary", "standard", "full")
 DEFAULT_DETAIL = "standard"
@@ -214,7 +214,8 @@ def _parse(root: Path, run_dir: Path) -> dict:
         raise ValueError(f"The source snapshot has status '{sources.get('status')}'; resolve source-report.md first.")
     body = _snapshot_text(root, run_dir, sources["document"])
     _front, body = split_front_matter(body)
-    builder = _Builder(sources, body, _setting_names(root, run_dir, sources), detail=_detail(run_dir))
+    builder = _Builder(sources, body, _setting_names(root, run_dir, sources), detail=_detail(run_dir),
+                       eligibility=_harness(run_dir))
     record = builder.build()
     data = (json.dumps(record, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     relative = run_dir.relative_to(root)
@@ -233,6 +234,13 @@ def _detail(run_dir: Path) -> str:
         raise ValueError(f"request.json asks for an unknown level of detail {detail!r}; "
                          f"use one of {', '.join(DETAILS)}.")
     return detail
+
+
+def _harness(run_dir: Path) -> bool:
+    """Whether an LLM harness plans this request; its coverage map then marks what is eligible, not what is said."""
+    path = run_dir / "request.json"
+    request = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    return (request.get("workflow") or {}).get("kind") == "harness"
 
 
 def _snapshot_input(root: Path, run_dir: Path, entry: dict) -> bytes:
@@ -292,9 +300,12 @@ class _Builder:
     """Build the structured record for one document."""
 
     def __init__(self, sources: dict, body: str, settings: tuple[set[str], list[str]], *,
-                 detail: str = DEFAULT_DETAIL):
+                 detail: str = DEFAULT_DETAIL, eligibility: bool = False):
         self.sources = sources
         self.detail = detail
+        # A harness request separates extraction from editorial selection: its coverage map marks every
+        # section eligible for narration, and the static map for the requested detail is kept for comparison.
+        self.eligibility = eligibility
         self.entry = sources["document"]
         self.wiki = sources["wiki"]
         self.version = self.entry.get("version")
@@ -380,6 +391,16 @@ class _Builder:
         examples = self._examples()
         open_questions = self._open_questions()
         coverage = self._coverage(terms, subject, conclusions)
+        static = None
+        if self.eligibility:
+            requested, static = self.detail, coverage
+            self.detail = "full"
+            try:
+                coverage = self._coverage(terms, subject, conclusions)
+            finally:
+                self.detail = requested
+            coverage.update(mode="eligibility", requested_detail=requested)
+            static["mode"] = "static"
         issues = self._issues(subject, conclusions, coverage)
         for section in self.sections:
             for key in ("_index", "_inline"):
@@ -414,6 +435,8 @@ class _Builder:
             "open_questions": open_questions,
             "related_pages": self._related_pages(),
             "coverage": coverage,
+            # The extractive coverage map for the requested detail: a regression baseline, not the plan.
+            **({"static_coverage": static} if static else {}),
             "issues": issues,
             "sections": self.sections,
             "links": self.links,
@@ -1124,7 +1147,14 @@ class _Builder:
                            "message": f"{len(maintenance)} maintenance sentence(s), such as agent instructions and "
                                       "prompt-hygiene notes, are excluded from narration.", "action": None})
         decisions = coverage["decisions"]
-        if coverage["detail"] == "summary":
+        if coverage.get("mode") == "eligibility":
+            issues.append({"severity": "note", "code": "eligibility", "lines": [],
+                           "message": f"The harness plan selects content from "
+                                      f"{decisions['explain'] + decisions['summarize']} eligible section(s), about "
+                                      f"{coverage['full_minutes']} minutes in full; the static coverage map for "
+                                      f"{coverage['requested_detail']} detail is kept only for comparison.",
+                           "action": None})
+        elif coverage["detail"] == "summary":
             issues.append({"severity": "note", "code": "summary", "lines": [],
                            "message": f"The summary plans about {coverage['planned_minutes']} of the page's "
                                       f"{coverage['full_minutes']} minutes of narration: {decisions['summarize']} "
@@ -1395,6 +1425,10 @@ def _render_coverage(record: dict) -> str:
     if subject["focus_terms"]:
         lines.append("- Focus terms: " + ", ".join(f"`{term}`" for term in subject["focus_terms"]))
     target = coverage["target_minutes"]
+    if coverage.get("mode") == "eligibility":
+        lines += [f"- Mode: eligibility. The LLM harness plans what to narrate for {coverage['requested_detail']} "
+                  "detail; `explain` below means eligible. document.json keeps the static map as `static_coverage` "
+                  "for regression comparison."]
     lines += [
         f"- Level of detail: {coverage['detail']}",
         f"- Narration estimate: {coverage['full_minutes']} minutes for every narratable section, "

@@ -2,13 +2,27 @@
 
 Create a tool that generates **one narrated MP4 from one Markdown document specified by the user**. Each request must cross-check the document's subject, terminology, and version-specific explanations against the repository's glossary. Use **Kokoro** for narration.
 
-This file describes the implementation plan. The commands, modules, and configuration below are proposed interfaces to build. Steps 1–13 are built. Their sections below end with implementation notes that record decisions and departures from the original proposal.
+This file describes the implementation plan. The commands, modules, and configuration below are proposed interfaces to build. Steps 1–14 are built. Their sections below end with implementation notes that record decisions and departures from the original proposal.
+
+## Current workflow: LLM harness orchestration (Step 14)
+
+Every new video request is orchestrated by an LLM harness that follows the root
+[AGENTS.md](AGENTS.md), from the user's selected Markdown document through
+validated delivery. The harness plans, writes, and reviews the content in
+separate passes; pgvideo prepares the evidence, validates every artifact, holds
+the content gate, and produces the media. Steps 1–6 and 8–12 below still run for
+every request. Step 7's built-in extractive drafter now drafts only the
+comparison baseline and replays requests made before Step 14; Step 4's coverage
+map marks eligibility, and Step 13's levels guide the harness plan. The design is
+in the [detailed proposal](docs/llm-video-generation-proposal.md); the harness
+reference is [docs/harness.md](docs/harness.md). The proposal's release gates that
+need a live model and human judges have not been run; see Step 14.
 
 ## Implementation status
 
 | Step | Status | Notes |
 | --- | --- | --- |
-| 1. Define the on-demand request | Done | `scripts/pgvideo generate` validates one document and writes `runs/<request-id>/request.json`. |
+| 1. Define the on-demand request | Done | `scripts/pgvideo prepare` (formerly `generate`) validates one document and writes `runs/<request-id>/request.json`. |
 | 2. Set up a project-contained environment | Done | macOS arm64 only. Every command runs under a macOS Seatbelt sandbox, and `doctor --sample` passes offline. |
 | 3. Snapshot the document and glossary together | Done | One resolved wiki commit, a verified PostgreSQL source snapshot, `sources.json`, `source-report.md`, and manifest provenance. |
 | 4. Parse the selected document | Done | `document.json` with stable section, block, and sentence IDs and extracted facts, plus a coverage map in `document.json` and `coverage.md`. |
@@ -21,8 +35,11 @@ This file describes the implementation plan. The commands, modules, and configur
 | 11. Validate and return the requested video | Done | Full media and quality checks, `quality-report.json`, and a local delivery package. |
 | 12. Add reuse and focused implementation checks | Done | Validated videos keyed by every input and reused only on an exact match, stale stage records dropped, small-fixture checks, a real-Kokoro integration check, a full trial, and a kill-on-access isolation audit. |
 | 13. Choose the level of detail | Done | `generate --detail summary\|standard\|full`: a summary of the page's key points, the standard condensed video, or every section, planned in the coverage map and followed by every later step. Tables are planned at the words read from their rows, and a condensed table keeps its first rows. |
+| 14. Orchestrate every request with an LLM harness | Done in code; release evaluation pending | `AGENTS.md`, phase prompts, JSON Schemas, the evidence packet, plan/storyboard/review import with a content gate in every media stage, structured stage results, recovery and replay, measured-duration checks, and the README migration. The live-model evaluation, blind comparison, and human review of the proposal's acceptance gates have not been run. |
 
-As of 2026-09-29, `generate` runs through Step 11 and exits with status 0 when every step passes, 3 for `needs_review`, and 1 for errors. `resume --request <id>` repeats Steps 6–11 for an existing request, `script --request <id>` repeats Steps 7–11, `narrate --request <id>` repeats Steps 8–11, `timing --request <id>` repeats Steps 9–11, `render --request <id>` repeats Steps 10–11, and `validate --request <id>` repeats Step 11. After the script passes, `generate`, `resume`, and `script` reuse a validated video with the same inputs unless `--no-reuse` is given. `audit` repeats `setup --offline` and the offline sample under a kill-on-access sandbox profile. `generate --detail summary` or `--detail full` makes a summary of the page's key points or a video of every section instead of the standard condensed video (Step 13).
+Before Step 14, `generate` ran through Step 11 and exited with status 0 when every step passes, 3 for `needs_review`, and 1 for errors. `resume --request <id>` repeats Steps 6–11 for an existing request, `script --request <id>` repeats Steps 7–11, `narrate --request <id>` repeats Steps 8–11, `timing --request <id>` repeats Steps 9–11, `render --request <id>` repeats Steps 10–11, and `validate --request <id>` repeats Step 11. After the script passes, `generate`, `resume`, and `script` reuse a validated video with the same inputs unless `--no-reuse` is given. `audit` repeats `setup --offline` and the offline sample under a kill-on-access sandbox profile. `generate --detail summary` or `--detail full` makes a summary of the page's key points or a video of every section instead of the standard condensed video (Step 13).
+
+As of Step 14 (2026-09-29), `prepare` runs Steps 1–6 and writes the evidence packet, then stops; the harness imports its plan (`plan`), storyboard (`script --storyboard`), and separate review (`review`); and `build` runs Steps 8–11 once the content gate passes. Every harness-facing command exits 0 on success, 3 for `needs_review`, and 1 for errors, and prints a structured result with `--json`. `status`, `resume`, `replay`, `excerpt`, `baseline`, and `note` inspect, recover, compare, and record. Requests made before Step 14 keep the commands described above.
 
 ## Requirements and starting defaults
 
@@ -490,14 +507,47 @@ Use deterministic checks for metadata, references, and version compatibility. Me
 - Fixed during calibration: Step 4 counted a displayed table as 25 words, but the drafter reads every row aloud. Tables supplied 53,553 of the 164,984 words of the 82 standard drafts, and six pages narrated more than twice their plan; the v17 query planner tutorial narrated 20,889 words against 1,487 planned, 19,845 of them from tables. A table is now planned at the words of its rows as `script._row_sentence` reads them ("first cell: header cell, …"); code and images keep the 25-word allowance. A condensed section keeps its prose as before, or, when it is only a table, the table's first rows within the section's summary words, at least one row; the drafter shows and reads only those rows. A section with neither, such as code alone, is explained when it fits and left out otherwise, so a condensed section never narrates nothing. At the standard level, the drafts now narrate 0.90 to 1.16 times their plan (median 1.04), the longest draft has 1,613 words, 27 sections read a condensed table, and a table-only caveat, such as each of the tutorial's 16 "Exceptions and limitations" tables, is kept in condensed form. The Step 1 example has no narrated table, so its plan and video are unchanged. Summaries never read tables and are unchanged; full-detail drafts are unchanged, but their plans now count their tables.
 - Eleven tests were added (130 in all): the option and its default; summary and full-detail coverage, including a nested Short answer and the conclusions of a page without a summary section; an unknown level; a summary draft with a review omission; full detail without a length target; the delivered file name of each level; and an end-to-end summary that builds its own video and is reused by a second summary request. The long-document script test now also condenses long open questions, and two tests plan tables at their rows and condense them to their first rows. Each of these fails when its fix is reverted.
 
+## Step 14 — Orchestrate every request with an LLM harness
+
+The design and its reasons are in [docs/llm-video-generation-proposal.md](docs/llm-video-generation-proposal.md).
+
+1. Add a root `AGENTS.md` runbook with a declared instruction version, and link it to the command reference, evidence rules, schemas, phase prompts, and recovery instructions.
+2. Replace `generate` with `prepare`, which runs Steps 1–6, writes an evidence packet, and stops before content. Record the harness workflow, audience, duration target, and instruction version with the request.
+3. Separate extraction from selection: for a harness request, the coverage map marks eligibility, and the static map for the requested level is kept for comparison.
+4. Import and check the harness's content plan, its version 2 storyboard, and a separate semantic review against versioned JSON Schemas and the snapshot; statuses come only from pgvideo.
+5. Enforce a content gate in every media stage, compare measured narration with the target, and deliver the content report.
+6. Return structured stage results, keep handoffs on disk, and support resume, replay of accepted content, bounded repairs, and an extractive baseline for comparison.
+7. Rewrite the README for the harness workflow.
+
+**Deliverable:** a fresh harness session can take one named document from `prepare` to validated delivery with only the documented commands, and no media is produced without an accepted plan and a passed separate review.
+
+**Status: done in code; the release evaluation is pending.** Implementation notes:
+
+- `AGENTS.md` (instruction version 1) covers purpose and scope, project tools, start or resume, sources and glossary, planning, script and visuals, semantic review, validation and repair, media production, recovery and escalation, and completion. `prompts/plan.md`, `draft.md`, `review.md`, and `repair.md` hold the phase instructions; `schemas/plan.schema.json`, `storyboard.schema.json`, `review.schema.json`, and `stage-result.schema.json` are JSON Schema 2020-12 files, validated with `jsonschema` (already locked as a `csvw` dependency, now listed in `requirements.in`) against a local registry that never fetches. `docs/harness.md` is the reference `AGENTS.md` links to.
+- `orchestration.py` records `orchestration.json`: the instruction file's version and SHA-256 with a history of changes, prompt and schema hashes, the review policy, the request's constraints, producer metadata as the harness reported it (hashes of prompts are computed, not trusted; unreported values are `unavailable`), repair counters, events, and media checks. A changed instruction hash is recorded; a changed version drops the plan and later stages so `resume` revalidates the saved files. It also computes each request's legal next actions and the structured result every harness-facing command prints with `--json`.
+- `document.py` builds the eligibility map (the full-detail rules) for a harness request and keeps the requested level's map as `static_coverage`. Steps 5 and 6 then match and check every eligible sentence, so claims the old map omitted are checked before a plan can select them. A conflict anywhere in the eligible text now needs a resolution before planning.
+- `evidence.py` writes `evidence-packet.json` and resolves evidence IDs (`unit`, `pg:<path>#L<a>-L<b>`, `guc:<setting>`, `glossary:<anchor>`) against the snapshot only. Excerpts carry three lines of context, at most 80 lines, and their SHA-256; `excerpt` serves other ranges of up to 400 lines from the snapshot and reports a file outside it as missing evidence. No snapshot extension is implemented: a file missing at the pin stays missing. The packet also carries the Kokoro rate measured from earlier narration with the same voice and speed (136.9 words per minute on this machine against the 150 the coverage map assumes). The content digest excludes the request ID, times, and speech rate.
+- `planning.py` checks the plan as `README.md` describes; `script.py` imports version 2 storyboards with claims, evidence IDs, and a `paraphrase` origin, keeps sources inside the plan, requires planned claims to be narrated, and estimates at the measured rate. A harness request has no built-in drafter; `--drafter-command` remains an optional offline adapter. Version 1 scene files still import for older requests.
+- New in every workflow: a diagram edge that points against the relationship its source sentence states is blocking (`diagram_direction`), and `script.md` labels Step 6 statuses as lexical ("lexical verified").
+- `review.py` checks coverage of every target, separation, digests, and evidence IDs, and decides the gate; `narration.py`, `reuse.py`, `timing.py`, `render.py`, and `validate.py` all call the same gate. Review policy 1. Two storyboard repair rounds after a failed review, then `--human-revision`; one duration rewrite, then only the user's `--accept-duration`, which persists while the same storyboard content measures the same length.
+- Reuse: accepted content is registered under `cache/content/<key>/` (evidence digest, prompts, schemas, review policy) and replayed by hash with `replay`, never as a new generation. A harness storyboard's digest excludes its estimates and statuses, because the measured speech rate changes as more narration is measured; the same scenes keep one review and one video key.
+- Environment: `prepare` replaces `generate` in the network-enabled commands. No pgvideo command calls a model or passes inference credentials.
+- Tests: `test_harness.py` (13 tests) uses recorded harness files derived from the extractive baseline, and `test_reuse.py` now builds through `prepare`, recorded content, and `build`. The suite has 143 tests. The two semantic mutations from the proposal are regression cases: the changed verb still passes the lexical recheck as `verified` and is stopped only by a `contradicted` review finding; the reversed edge is now rejected deterministically.
+- Trial: `prepare` on the Step 1 example at the current `master` found 11 eligible sections, 57 source excerpts, no missing citations, and four configuration facts. Its extractive baseline has 13 scenes and about 3.4 minutes. Recorded content derived from that baseline passed the plan checks but not the storyboard: at the measured Kokoro rate the estimate is 3.7 minutes, over the 3-minute summary target's 207-second bound, which matches the 3.70-minute video the extractive pipeline delivered for this page. The mismatch the proposal observed is now caught before synthesis.
+- Not done, and needed before the proposal's release gates can be claimed: the evaluation set with live-model plans, scripts, and reviews; comparison of reviewer decisions with human labels; the blind comparison of new and baseline scripts; human review of a release set; duration statistics over feasible requests; usage and latency tracking with a real harness; and a fresh harness session following `AGENTS.md` from one document through delivery. No live LLM generation was performed while implementing this step.
+
 ## Proposed project layout
 
-Entries marked `(planned)` do not exist yet. Everything else exists as of Step 13.
+Entries marked `(planned)` do not exist yet. Everything else exists as of Step 14.
 
 ```text
 postgres-videos/
   plan.md
   README.md
+  AGENTS.md                      # Step 14 harness runbook (instruction version 1)
+  prompts/                       # Step 14 phase prompts: plan, draft, review, repair
+  schemas/                       # Step 14 JSON Schemas: plan, storyboard v2, review, stage result
+  docs/                          # Step 14 proposal and harness reference
   pyproject.toml
   requirements.in                # Direct requirements
   requirements.lock              # Every wheel with its SHA-256 digest
@@ -524,7 +574,7 @@ postgres-videos/
     environment-report.json
   config/defaults.yaml           # (not built; defaults live in cli.py)
   src/pgvideo/
-    cli.py                       # generate (Steps 1, 3–11, and --detail of 13), resume (6–11), script (7–11), narrate (8–11), timing (9–11), render (10–11), validate (11)
+    cli.py                       # prepare (Steps 1–6 and the evidence packet), status, plan, script, review, build (8–11), resume, replay, excerpt, baseline, note, narrate, timing, render, validate
     paths.py                     # Project root and escape-checked directories
     sources.py                   # GitHub validation, ref resolution, verified commit files
     assets.py                    # Pinned local Kokoro assets
@@ -541,13 +591,18 @@ postgres-videos/
     validate.py                  # Step 11 media checks and delivery
     reuse.py                     # Step 12 video keys, the reuse index, verified reuse, registration
     stages.py                    # Stage order; a repeated stage drops the records built from it
+    orchestration.py             # Step 14 workflow, orchestration record, stage results, content gate
+    contracts.py                 # Step 14 JSON Schema validation of harness files
+    evidence.py                  # Step 14 evidence packet and evidence IDs
+    planning.py                  # Step 14 content plan import and checks
+    review.py                    # Step 14 separate review import and the content gate
   templates/                     # Step 10 slide.html
   assets/fonts/                  # Inter and Noto Sans Mono with their licenses
   pronunciation/en.yaml          # Terms, identifier parts, abbreviations, and units for TTS text
   tests/                         # test_request.py, test_environment.py, test_sources.py, test_document.py,
                                  # test_glossary.py, test_crosscheck.py, test_script.py, test_timing.py,
                                  # test_render.py, test_validate.py, test_checks.py, test_integration.py,
-                                 # test_reuse.py
+                                 # test_reuse.py, test_harness.py, harness_fixture.py (recorded harness files)
     fixtures/                    # Small wiki (glossary and one page per case) and pinned PostgreSQL files
   cache/                         # Ignored downloads, models, and reusable assets
     pip/
@@ -558,6 +613,7 @@ postgres-videos/
     sources/<owner>/<repository>/<commit>/   # commit.json, tree.json, files/<path>; the glossary is downloaded per request
     narration/<prefix>/<key>.wav              # Step 8 audio cache
     videos/<key>/<request-id>.json           # Step 12 index of validated videos
+    content/<key>/<request-id>.json          # Step 14 accepted harness content, for replay
   runs/<request-id>/              # Inputs, reports, scripts, scenes, audio, and logs
     request.json                 # Step 1
     manifest.json                # Environment snapshot and source provenance
@@ -571,6 +627,13 @@ postgres-videos/
     glossary-check.json          # Step 6 results, claims, corrections, exceptions, and omissions
     glossary-check.md            # Step 6 report with blocking issues and resolution snippets
     resolutions.yaml             # Reviewer-written Step 6 resolutions, applied by resume
+    orchestration.json           # Step 14 instructions, prompts, producers, repairs, events, media checks
+    evidence-packet.json         # Step 14 evidence for the harness
+    plan.json, plan-report.md    # Step 14 accepted content plan
+    authored/                    # Step 14 exact plan, storyboard, and review files the harness submitted
+    content-review.json, content-report.md   # Step 14 separate review and content gate
+    baseline/                    # Step 14 extractive comparison script
+    last-result.json             # Step 14 last structured stage result
     draft-input.json             # Step 7 input for any drafter
     storyboard.json              # Step 7 scenes, narration with display and TTS text, checks, coverage
     script.md                    # Step 7 script for review
@@ -588,6 +651,7 @@ postgres-videos/
     captions.vtt
     references.md
     glossary-check.md
+    content-report.md, plan.md, orchestration.json   # Step 14
     quality-report.json
     manifest.json
 ```
@@ -611,3 +675,6 @@ Keep `.venv/`, `.runtime/`, `cache/`, and generated runs/outputs out of version 
 - [x] The manifest records enough information to reproduce or resume the request. (Step 12: the environment and every Step 3 input with commits and hashes; each stage's input and output hashes, the glossary index, the resolutions file, the drafter, and the pronunciation dictionary; the tools digest of each media stage; and the video's key with all of its components. A stage record is dropped when an earlier stage repeats. Steps 6–11 can be repeated for the same request; a Step 3 or 4 blocker needs a new request.)
 - [x] No video is generated without an explicit request specifying its document. (Steps 1 and 11)
 - [x] A request chooses how much of its document the video narrates: a summary of the key points, the standard condensed video, or every section. (Step 13)
+- [x] Every new request is orchestrated by an LLM harness following `AGENTS.md`; pgvideo validates its plan, storyboard, and separate review, and no media stage runs without the content gate. (Step 14)
+- [x] A request can be resumed or its accepted content replayed from disk without chat history or new inference, and missing harness capabilities stop with an actionable result. (Step 14)
+- [ ] The proposal's release gates with a live model: reviewer decisions compared with human labels, a blind comparison against the extractive baseline, human review of a release set, and duration results over feasible requests. (Step 14 evaluation, not run)

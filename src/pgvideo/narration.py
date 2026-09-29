@@ -14,6 +14,7 @@ import numpy as np
 import soundfile as sf
 
 from .assets import _checked_path, local_kokoro, local_selection
+from .orchestration import duration_check, require_content_gate
 from .reuse import stage_fingerprint
 from .sources import write_atomic
 from .speech import Pronunciation
@@ -156,6 +157,7 @@ def _create_narration(root: Path, run_dir: Path, *, loudness: float, peak: float
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("script", {}).get("status") != "passed":
         raise ValueError("The script must pass before narration; review script.md")
+    require_content_gate(run_dir, manifest)
     storyboard_path = run_dir / "storyboard.json"
     if _sha(storyboard_path) != manifest["script"]["sha256"]:
         raise ValueError("storyboard.json changed after validation; rerun the script stage")
@@ -279,6 +281,10 @@ def publish(root: Path, run_dir: Path, manifest: dict, record: dict) -> dict:
                               "units": units, "fingerprint": record.get("fingerprint")}
     if reused_from:
         manifest["narration"]["reused_from"] = reused_from
+    # A harness request compares the measured length with its target before timing and rendering.
+    if (check := duration_check(run_dir, record["duration_seconds"],
+                                (manifest.get("script") or {}).get("digest"))) is not None:
+        manifest["narration"]["duration_check"] = check
     write_atomic(root, run_dir.relative_to(root) / "manifest.json",
                  (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode(), label="Request")
     return manifest["narration"]

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pgvideo.cli import generate, parser
+from pgvideo.cli import parser, prepare
 from pgvideo.document import parse_document
 from pgvideo.glossary import INDEX, build_index, english_words, match_glossary, version_scope
 from pgvideo.snapshot import snapshot_sources
@@ -423,7 +423,7 @@ class MatchTests(unittest.TestCase):
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual((manifest["status"], manifest["glossary"]["status"]), ("failed", "failed"))
 
-    def test_generate_command_reports_glossary_matches(self):
+    def test_prepare_command_reports_glossary_matches(self):
         self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=TEXT, glossary=GLOSSARY), refs=["master"])
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
         self.enterContext(patch("pgvideo.cli.local_selection"))
@@ -431,14 +431,14 @@ class MatchTests(unittest.TestCase):
         self.enterContext(patch("pgvideo.sources._github_contents",
                                 side_effect=lambda path, ref: {"type": "file", "path": path}))
         install_project_files(self.workspace)
-        args = parser().parse_args(["generate", "--document", DOCUMENT])
+        args = parser().parse_args(["prepare", "--document", DOCUMENT])
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            self.assertEqual(generate(args, self.workspace), 0, stderr.getvalue())
+            self.assertEqual(prepare(args, self.workspace), 0, stderr.getvalue())
         self.assertRegex(stdout.getvalue(), r"Glossary index: .*glossary-index\.json \(\d+ entries, built from the "
                                             r"glossary downloaded for this request\)")
         self.assertRegex(stdout.getvalue(), r"Glossary matches: .*glossary-matches\.json \(\d+ entries: \d+ central")
-        self.assertIn("Storyboard:", stdout.getvalue())
+        self.assertIn("Evidence packet:", stdout.getvalue())
 
 
 if __name__ == "__main__":

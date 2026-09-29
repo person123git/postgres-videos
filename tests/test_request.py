@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from pgvideo.cli import create_request, parser
 from pgvideo.sources import SourceError, resolve_document
+from test_sources import install_project_files
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,10 +41,13 @@ class RequestTests(unittest.TestCase):
         self.outside = self.fixture_root / "outside"
         self.outside.mkdir()
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
+        install_project_files(self.workspace)
+        # The runbook, prompts, schemas, and pronunciation a request reads; nothing else may appear.
+        self.installed = sorted(path.name for path in self.workspace.iterdir())
 
     def request_args(self, output="output"):
         return parser().parse_args(
-            ["generate", "--document", "wiki/example.md", "--output", str(output)]
+            ["prepare", "--document", "wiki/example.md", "--output", str(output)]
         )
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
@@ -64,11 +68,11 @@ class RequestTests(unittest.TestCase):
         data = json.loads(create_request(self.request_args(), workspace=self.workspace).read_text(encoding="utf-8"))
         self.assertEqual(data["settings"]["detail"], "standard")
         for detail in ("summary", "full"):
-            args = parser().parse_args(["generate", "--document", "wiki/example.md", "--detail", detail])
+            args = parser().parse_args(["prepare", "--document", "wiki/example.md", "--detail", detail])
             data = json.loads(create_request(args, workspace=self.workspace).read_text(encoding="utf-8"))
             self.assertEqual(data["settings"]["detail"], detail)
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            parser().parse_args(["generate", "--document", "wiki/example.md", "--detail", "short"])
+            parser().parse_args(["prepare", "--document", "wiki/example.md", "--detail", "short"])
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
     def test_request_manifest_records_environment_snapshot(self, _lookup):
@@ -110,7 +114,7 @@ class RequestTests(unittest.TestCase):
             with self.subTest(output=output), self.assertRaisesRegex(ValueError, "inside the project"):
                 create_request(self.request_args(output), workspace=self.workspace)
         lookup.assert_not_called()
-        self.assertEqual(list(self.workspace.iterdir()), [])
+        self.assertEqual(sorted(path.name for path in self.workspace.iterdir()), self.installed)
         self.assertEqual(list(self.outside.iterdir()), [])
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
@@ -149,7 +153,7 @@ class RequestTests(unittest.TestCase):
                         lookup.assert_called_once()
                     finally:
                         link.unlink(missing_ok=True)
-        self.assertEqual(list(self.workspace.iterdir()), [])
+        self.assertEqual(sorted(path.name for path in self.workspace.iterdir()), self.installed)
         self.assertEqual(list(self.outside.iterdir()), [])
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
@@ -228,10 +232,10 @@ class RequestTests(unittest.TestCase):
         with self.assertRaisesRegex(SourceError, "person123git/postgres-llm-wiki"):
             resolve_document("https://github.com/other/repo/blob/master/wiki/example.md")
         with self.assertRaises(SystemExit):
-            parser().parse_args(["generate"])
+            parser().parse_args(["prepare"])
         with self.assertRaises(SystemExit):
             parser().parse_args(
-                ["generate", "--document", "wiki/example.md", "--width", "1919"]
+                ["prepare", "--document", "wiki/example.md", "--width", "1919"]
             )
 
 

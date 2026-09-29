@@ -21,6 +21,7 @@ import numpy as np
 from pgvideo import cli, reuse
 from pgvideo import render as render_module
 from pgvideo.stages import STAGES, invalidate_after
+from harness_fixture import accept_content
 from test_sources import DOCUMENT, GLOSSARY_TEXT, PIN, POSTGRES, PROJECT_ROOT, WIKI, WIKI_COMMIT, FakeGitHub, \
     install_project_files, postgres_files, wiki_files
 
@@ -36,8 +37,7 @@ ABSENT_GLOSSARY = GLOSSARY_TEXT.replace(
     "A backend is the server process that serves one client connection.\n\n**Version notes:**\n"
     "- PostgreSQL 18: Not present in PostgreSQL 18.\n",
 )
-COMMANDS = {"generate": cli.generate, "resume": cli.resume, "script": cli.script, "narrate": cli.narrate,
-            "timing": cli.timing, "render": cli.render, "validate": cli.validate}
+COMMANDS = cli.COMMANDS
 
 
 def install_media_files(workspace: Path) -> None:
@@ -181,11 +181,20 @@ class ReuseTests(unittest.TestCase):
         return status, stdout.getvalue(), stderr.getvalue()
 
     def generate(self, *options, expect=0):
-        status, stdout, stderr = self.run_command("generate", "--document", DOCUMENT, "--width", "640",
-                                                  "--height", "360", *options)
-        self.assertEqual(status, expect, stderr)
+        """Prepare a request, accept recorded harness content, and build it; return the run and its output."""
+        build = [option for option in options if option == "--no-reuse"]
+        status, stdout, stderr = self.run_command("prepare", "--document", DOCUMENT, "--width", "640",
+                                                  "--height", "360", *[o for o in options if o not in build])
         line = next(line for line in stdout.splitlines() if line.startswith("Validated request: "))
-        return Path(line.removeprefix("Validated request: ")).parent, stdout
+        run_dir = Path(line.removeprefix("Validated request: ")).parent
+        if status != 0:
+            self.assertEqual(status, expect, stderr)
+            return run_dir, stdout
+        self.assertEqual(accept_content(self.workspace, run_dir)["review"]["status"], "passed")
+        # The small fixture is far shorter than the default target; the test accepts its measured length.
+        status, output, stderr = self.run_command("build", "--request", run_dir.name, "--accept-duration", *build)
+        self.assertEqual(status, expect, stderr)
+        return run_dir, stdout + output
 
     @staticmethod
     def manifest(run_dir):
@@ -211,6 +220,13 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(self.index(key), [first.name])
         calls, renders = len(self.kokoro.calls), self.slides.call_count
         self.assertGreater(calls, 0)
+        # A harness video is delivered with its content report, plan, and orchestration record.
+        delivery = self.workspace / "output" / first.name
+        for name in ("content-report.md", "plan.md", "orchestration.json"):
+            self.assertTrue((delivery / name).is_file(), name)
+        quality = json.loads((first / "quality-report.json").read_text(encoding="utf-8"))
+        self.assertEqual((quality["checks"]["content"]["workflow"], quality["checks"]["content"]["duration"]["status"]),
+                         ("harness", "accepted"))
 
         second, stdout = self.generate("--output", "elsewhere")
         self.assertIn(f"Reuse: request {first.name} has a validated video with the same inputs", stdout)
@@ -260,7 +276,6 @@ class ReuseTests(unittest.TestCase):
         key = self.manifest(standard)["reuse"]["key"]
 
         summary, stdout = self.generate("--detail", "summary")
-        self.assertIn("(summary detail: ", stdout)
         self.assertIn("no validated video has the same inputs", stdout)
         built = self.manifest(summary)
         self.assertEqual((built["status"], built["script"]["detail"]), ("completed", "summary"))
@@ -317,10 +332,12 @@ class ReuseTests(unittest.TestCase):
     def test_retries_reuse_their_own_video_and_create_no_requests(self):
         first, _stdout = self.generate()
         calls, renders = len(self.kokoro.calls), self.slides.call_count
-        for command in ("script", "resume"):
-            with self.subTest(command=command):
-                status, stdout, stderr = self.run_command(command, "--request", first.name)
-                self.assertEqual(status, 0, stderr)
+        for commands in (["build"], ["resume", "build"]):
+            with self.subTest(commands=commands):
+                for command in commands:
+                    extra = ["--accept-duration"] if command == "build" else []
+                    status, stdout, stderr = self.run_command(command, "--request", first.name, *extra)
+                    self.assertEqual(status, 0, stderr)
                 self.assertIn(f"Reuse: request {first.name} has a validated video with the same inputs", stdout)
                 manifest = self.manifest(first)
                 self.assertEqual((manifest["status"], manifest["render"]["reused_from"]), ("completed", first.name))

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-STAGES = ("sources", "document", "glossary", "glossary_check", "script", "narration", "timing", "render",
-          "validation")
+# A harness request adds the evidence packet, the accepted content plan, and the separate content review.
+# A request made before the harness workflow has none of them; its records simply lack those stages.
+STAGES = ("sources", "document", "glossary", "glossary_check", "evidence", "plan", "script", "content_review",
+          "narration", "timing", "render", "validation")
 # The reuse lookup describes one storyboard, so it is dropped whenever the storyboard can change.
 STORYBOARD_STAGES = STAGES[:STAGES.index("script") + 1]
 

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .orchestration import is_harness, require_content_gate, require_duration
 from .paths import project_directory
 from .reuse import register, stage_fingerprint
 from .sources import write_atomic
@@ -85,6 +86,21 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         for stage in ("render", "timing", "narration", "script", "sources", "glossary_check"):
             if (manifest.get(stage) or {}).get("status") != "passed":
                 raise ValueError(f"The {stage} stage must pass before validation")
+        harness = is_harness(run_dir)
+        if harness:
+            # A harness video is delivered only with its accepted plan and a passed separate review of this storyboard.
+            require_content_gate(run_dir, manifest)
+            require_duration(run_dir, manifest)
+            for name, stage in (("plan.json", "plan"), ("content-review.json", "content_review"),
+                                ("evidence-packet.json", "evidence")):
+                if _sha(run_dir / name) != manifest[stage]["sha256"]:
+                    raise ValueError(f"Validated input changed: {name}")
+            review = manifest["content_review"]
+            report["checks"]["content"] = {
+                "workflow": "harness", "plan": manifest["plan"]["digest"], "review": review["digest"],
+                "review_policy": review["policy"], "reviewer_separation": review["reviewer"]["separation"],
+                "verdicts": review["counts"]["verdicts"], "minor_findings": review["counts"]["minor"],
+                "duration": manifest["narration"].get("duration_check")}
         render = json.loads((run_dir / "render.json").read_text())
         timeline = json.loads((run_dir / "timeline.json").read_text())
         audio_map = json.loads((run_dir / "narration/audio-map.json").read_text())
@@ -191,6 +207,9 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         files = {f"{slug}.mp4": draft, "transcript.md": run_dir / "script.md",
                  "captions.srt": run_dir / "captions.srt", "captions.vtt": run_dir / "captions.vtt",
                  "references.md": run_dir / "references.md", "glossary-check.md": run_dir / "glossary-check.md"}
+        if harness:
+            files |= {"content-report.md": run_dir / "content-report.md", "plan.md": run_dir / "plan-report.md",
+                      "orchestration.json": run_dir / "orchestration.json"}
         for name, source in files.items():
             target = destination / name
             temporary = destination / f".{name}.tmp"

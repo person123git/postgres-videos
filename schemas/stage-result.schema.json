@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pgvideo.invalid/schemas/stage-result.schema.json",
+  "title": "pgvideo stage result",
+  "description": "What every harness-facing command prints with --json and saves as runs/<request-id>/last-result.json. `failed` is an execution error; `needs_review` means the stage ran and found issues that need a repair or a decision.",
+  "type": "object",
+  "required": ["request_id", "stage", "status", "artifacts", "issues", "next_actions", "message"],
+  "properties": {
+    "request_id": {"type": ["string", "null"]},
+    "stage": {"type": "string"},
+    "status": {"enum": ["passed", "completed", "needs_review", "failed"]},
+    "artifacts": {"type": "array", "items": {
+      "type": "object", "required": ["path", "sha256"],
+      "properties": {"path": {"type": "string"}, "sha256": {"type": ["string", "null"]}}}},
+    "issues": {"type": "array", "items": {
+      "type": "object", "required": ["severity", "code", "message"],
+      "properties": {"severity": {"enum": ["blocking", "warning", "note"]}, "code": {"type": "string"},
+                     "message": {"type": "string"}}}},
+    "next_actions": {"type": "array", "items": {
+      "type": "object", "required": ["action", "reason"],
+      "properties": {"action": {"enum": ["run", "author", "escalate", "deliver"]},
+                     "phase": {"enum": ["plan", "draft", "review", "repair"]},
+                     "command": {"type": "string"}, "reason": {"type": "string"}, "then": {"type": "string"}}}},
+    "message": {"type": "string"}
+  }
+}

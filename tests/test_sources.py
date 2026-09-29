@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 from urllib.parse import unquote, urlsplit
 
-from pgvideo.cli import NEEDS_REVIEW, generate, parser
+from pgvideo.cli import NEEDS_REVIEW, parser, prepare
 from pgvideo.sources import SourceError, _http_get, git_blob_sha
 from pgvideo.snapshot import snapshot_sources
 
@@ -89,10 +89,13 @@ A backend is the server process that serves one client connection.
 
 
 def install_project_files(workspace: Path) -> None:
-    """Copy the committed project files that a request reads, such as the pronunciation dictionary."""
+    """Copy the committed project files that a request reads: pronunciation, the runbook, prompts, and schemas."""
     target = workspace / "pronunciation"
     target.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(PROJECT_ROOT / "pronunciation" / "en.yaml", target / "en.yaml")
+    shutil.copyfile(PROJECT_ROOT / "AGENTS.md", workspace / "AGENTS.md")
+    for directory in ("prompts", "schemas"):
+        shutil.copytree(PROJECT_ROOT / directory, workspace / directory, dirs_exist_ok=True)
 
 
 def wiki_files(document=DOCUMENT_TEXT, glossary=GLOSSARY_TEXT):
@@ -412,7 +415,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(manifest["environment"], {"x": 1})
         self.assertEqual(manifest["sources"]["wiki"]["commit"], WIKI_COMMIT)
 
-    def test_generate_command_reports_status(self):
+    def test_prepare_command_reports_status(self):
         def contents(path, ref):
             return {"type": "file", "path": path}
 
@@ -421,18 +424,18 @@ class SnapshotTests(unittest.TestCase):
         self.enterContext(patch("pgvideo.cli._narrate", return_value=0))
         self.enterContext(patch("pgvideo.sources._github_contents", side_effect=contents))
         install_project_files(self.workspace)
-        args = parser().parse_args(["generate", "--document", DOCUMENT])
+        args = parser().parse_args(["prepare", "--document", DOCUMENT])
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            self.assertEqual(generate(args, self.workspace), 0)
+            self.assertEqual(prepare(args, self.workspace), 0, stderr.getvalue())
         self.assertIn(f"Wiki commit: {WIKI_COMMIT} (ref master)", stdout.getvalue())
         self.assertIn(f"PostgreSQL 18 source commit: {PIN}", stdout.getvalue())
 
         self.replace_wiki(document=DOCUMENT_TEXT.replace("version: 18", "version: 17"))
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            self.assertEqual(generate(args, self.workspace), NEEDS_REVIEW)
-        self.assertIn("needs review: 1 blocking issue", stderr.getvalue())
+            self.assertEqual(prepare(args, self.workspace), NEEDS_REVIEW)
+        self.assertIn("Needs review: 1 blocking issue", stderr.getvalue())
         self.assertIn("source-report.md", stdout.getvalue())
 
 

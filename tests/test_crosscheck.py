@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pgvideo.cli import NEEDS_REVIEW, generate, parser, resume
+from pgvideo.cli import NEEDS_REVIEW, parser, prepare, resume
 from pgvideo.crosscheck import RESOLUTIONS, _guc_data, _guc_table, _number, _same, _sentence_facts, check_glossary
 from pgvideo.document import parse_document
 from pgvideo.glossary import _plain, match_glossary
@@ -536,7 +536,7 @@ class CheckTests(unittest.TestCase):
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual((manifest["status"], manifest["glossary_check"]["status"]), ("failed", "failed"))
 
-    def test_generate_needs_review_and_resume_continues_the_same_request(self):
+    def test_prepare_needs_review_and_resume_continues_the_same_request(self):
         self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=BLOCKING, glossary=GLOSSARY), refs=["master"])
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
         self.enterContext(patch("pgvideo.cli.local_selection"))
@@ -548,11 +548,11 @@ class CheckTests(unittest.TestCase):
             args = parser().parse_args(list(argv))
             stdout, stderr = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                status = (generate if argv[0] == "generate" else resume)(args, self.workspace)
+                status = (prepare if argv[0] == "prepare" else resume)(args, self.workspace)
             return status, stdout.getvalue(), stderr.getvalue()
 
         install_project_files(self.workspace)
-        status, stdout, stderr = run("generate", "--document", DOCUMENT)
+        status, stdout, stderr = run("prepare", "--document", DOCUMENT)
         self.assertEqual(status, NEEDS_REVIEW, stderr)
         self.assertIn("Glossary check:", stdout)
         (run_dir,) = (self.workspace / "runs").iterdir()
@@ -566,7 +566,8 @@ class CheckTests(unittest.TestCase):
         status, stdout, stderr = run("resume", "--request", run_dir.name)
         self.assertEqual(status, 0, stderr)
         self.assertIn(f"Resuming request: {run_dir}", stdout)
-        self.assertIn("Storyboard:", stdout)
+        self.assertIn("Evidence packet:", stdout)
+        self.assertIn("nothing saved yet", stdout)
 
         for request, message in (("../outside", "one directory name"), ("missing", "No request 'missing'")):
             with self.subTest(request=request):
@@ -579,7 +580,7 @@ class CheckTests(unittest.TestCase):
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         status, _stdout, stderr = run("resume", "--request", run_dir.name)
         self.assertEqual(status, 1)
-        self.assertIn("Only the cross-check can be resumed", stderr)
+        self.assertIn("only the cross-check and later stages can be resumed", stderr)
 
 
 class ParameterTests(unittest.TestCase):
