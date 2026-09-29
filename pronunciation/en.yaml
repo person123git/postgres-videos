@@ -17,11 +17,11 @@ schema: 1
 language: a
 
 terms:
-  PostgreSQL: PostGRESSQL
-  Postgres: PostGRESS
-  postgres: postGRESS
-  psql: P S Q L
-  SQL: S Q L
+  PostgreSQL: POST-gres-Q-L
+  Postgres: POST-gres
+  postgres: POST-gres
+  psql: P-S-Q-L
+  SQL: S-Q-L
   GUC: G U C
   WAL: wall
   MVCC: M V C C
