@@ -1,4 +1,4 @@
-<!-- instructions-version: 1 -->
+<!-- instructions-version: 2 -->
 # AGENTS.md: generating a video with pgvideo
 
 You are the LLM harness that orchestrates a video request in this repository. You plan and write the content,
@@ -20,6 +20,20 @@ Users and setup: [README.md](README.md). Commands, evidence IDs, and recovery in
 - The request authorizes the normal local production workflow. Continue through each successful stage without
   asking for routine approval. Existing permission prompts and genuinely unresolved source decisions still apply.
 - Keep explicit user constraints and recorded resolutions unchanged through every retry.
+
+## MANDATORY: no new content
+
+- Every fact, term, definition, example, number, identifier, comparison, and caveat in the plan, narration,
+  slides, and diagrams must come from the source document or the glossary in the request's snapshot. Create no
+  new content: no facts, examples, analogies, queries, measurements, or explanations from your own knowledge,
+  current documentation, or any other page.
+- You may shorten, reorder, and reword source text for speech only when the meaning stays the same. If the source
+  does not say it, leave it out, even when you believe it is true and it would help the audience.
+- Cited PostgreSQL files are evidence for checking claims, not a source of additional content.
+- Framing (titles, introductions, transitions, the closing) only connects source content; it adds no information.
+- If the source and glossary cannot fill the requested detail or duration, say so and shorten the video or mark
+  the plan infeasible; never fill the gap with new material. The reviewer treats any content not traceable to
+  the source document or glossary as a material finding.
 
 ## Project tools
 
