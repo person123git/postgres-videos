@@ -17,9 +17,9 @@ schema: 1
 language: a
 
 terms:
-  PostgreSQL: Postgres Q L
-  Postgres: Postgres
-  postgres: postgres
+  PostgreSQL: Post GRESS Q L
+  Postgres: Post GRESS
+  postgres: post GRESS
   psql: P S Q L
   SQL: S Q L
   GUC: G U C
