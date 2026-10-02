@@ -150,6 +150,20 @@ def parser() -> argparse.ArgumentParser:
     excerpt.add_argument("--path", required=True, help="file path in the PostgreSQL snapshot, such as "
                                                        "src/backend/utils/misc/guc_tables.c")
     excerpt.add_argument("--lines", required=True, help="line range such as 120-160")
+    packet = request_command("packet", "print one bounded page of the request's evidence packet: its index, or "
+                                       "one section, evidence by ID, glossary entries, or configuration facts")
+    piece = packet.add_mutually_exclusive_group()
+    piece.add_argument("--section", metavar="ID", help="one section's blocks, with the evidence and glossary IDs "
+                                                       "its units use")
+    piece.add_argument("--evidence", nargs="+", metavar="ID", help="excerpts or configuration facts by evidence "
+                                                                   "ID, such as pg:<path>#L<a>-L<b> or guc:<setting>")
+    piece.add_argument("--glossary", nargs="*", metavar="TERM",
+                       help="glossary candidates; with terms, anchors, or glossary:<anchor> IDs, those entries in "
+                            "full")
+    piece.add_argument("--settings", action="store_true", help="the configuration facts parsed from the pinned "
+                                                               "GUC table")
+    packet.add_argument("--page", type=int, default=1, help="page of the view (default: 1); the result reports "
+                                                            "how many pages there are")
     request_command("baseline", "draft the extractive regression baseline for comparison; never narrated")
     note = request_command("note", "record a visual or listening check of the rendered video that was actually "
                                    "performed")
@@ -598,6 +612,35 @@ def excerpt(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def packet(args: argparse.Namespace, root: Path) -> int:
+    """Print one bounded page of the evidence packet, so a harness never loads the whole file."""
+    from .evidence import packet as load_packet
+    from .packet import view
+
+    try:
+        run_dir, manifest = _request(root, args.request)
+        found = view(load_packet(run_dir, manifest), section=args.section, evidence=args.evidence,
+                     glossary=args.glossary, settings=args.settings, page=args.page)
+    except (ValueError, OSError, KeyError) as error:
+        if args.json:
+            print(json.dumps({"request_id": args.request, "stage": "packet", "status": "failed", "artifacts": [],
+                              "issues": [{"severity": "blocking", "code": "packet", "message": str(error)}],
+                              "next_actions": [], "message": f"pgvideo: {error}"}, indent=2, ensure_ascii=False))
+        else:
+            print(f"pgvideo: {error}", file=sys.stderr)
+        return 1
+    message = f"Page {found['page']} of {found['pages']}." + (
+        f" Repeat with --page {found['page'] + 1} for the next." if found["page"] < found["pages"] else "")
+    # Compact, unlike other results: indentation is about a third of the packet's size. Reading changes nothing,
+    # so the result is not kept as the request's last result.
+    result = {"request_id": run_dir.name, "stage": "packet", "status": "passed", "artifacts": [], "issues": [],
+              "next_actions": [], "message": message, "packet": found} if args.json else found
+    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    if not args.json:
+        print(message, file=sys.stderr)
+    return 0
+
+
 def baseline(args: argparse.Namespace, root: Path) -> int:
     from .script import create_baseline
 
@@ -990,8 +1033,8 @@ def script(args: argparse.Namespace, root: Path) -> int:
 
 
 COMMANDS = {"prepare": prepare, "status": status, "plan": plan, "script": script, "review": review, "build": build,
-            "resume": resume, "replay": replay, "excerpt": excerpt, "baseline": baseline, "note": note,
-            "narrate": narrate, "timing": timing, "render": render, "validate": validate}
+            "resume": resume, "replay": replay, "excerpt": excerpt, "packet": packet, "baseline": baseline,
+            "note": note, "narrate": narrate, "timing": timing, "render": render, "validate": validate}
 
 
 def main(argv: list[str] | None = None) -> int:

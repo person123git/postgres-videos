@@ -79,6 +79,7 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo resume --request <id>` | Repeats the glossary cross-check with the request's `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review. | no |
 | `scripts/pgvideo replay --request <id> --from <other-id>` | Revalidates another request's accepted content for this request when the evidence, prompts, and review policy match. No new inference. | no |
 | `scripts/pgvideo excerpt --request <id> --path <file> --lines <a>-<b>` | Prints lines of a PostgreSQL file from the request's snapshot with their evidence ID. | no |
+| `scripts/pgvideo packet --request <id> [--section <id> \| --evidence <id>… \| --glossary [<term>…] \| --settings] [--page <n>]` | Prints one bounded page of the evidence packet: its index, one section, evidence by ID, glossary candidates, or configuration facts. | no |
 | `scripts/pgvideo baseline --request <id>` | Drafts the old extractive script for comparison. It is never narrated or delivered. | no |
 | `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records a visual or listening check that was actually performed on the delivered video. | no |
 | `scripts/pgvideo narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage and the ones after it. The content gate applies. | no |
@@ -93,11 +94,12 @@ command, and a failed check stops the command. `scripts/pgvideo <command> --help
 lists a command's options.
 
 The harness-facing commands (`prepare`, `status`, `plan`, `script`, `review`,
-`build`, `resume`, `replay`, `excerpt`, `baseline`, `note`) take `--json`. They
+`build`, `resume`, `replay`, `excerpt`, `packet`, `baseline`, `note`) take `--json`. They
 then print one structured result on standard output, with `request_id`,
 `stage`, `status`, `artifacts`, `issues`, `next_actions`, and a `message`
 ([schemas/stage-result.schema.json](schemas/stage-result.schema.json)), and keep
-it as `runs/<id>/last-result.json`. Progress lines go to standard error.
+it as `runs/<id>/last-result.json`. Progress lines go to standard error. `excerpt`
+and `packet` only read, so their results are not kept.
 
 ### `prepare` options
 
@@ -237,6 +239,28 @@ audio cache. What stops a request and what happens next:
 | Content review | `content-report.md` | The harness gets two repair rounds; then it reports the remaining findings for your decision. |
 | Measured length | `status` | One rewrite of optional detail; then you may accept the length (`build --accept-duration`). |
 | Media validation | `quality-report.json` | The media is valid, but loudness or silence is out of range. Repeat the narration with other settings, or revise the script. |
+
+### Read the evidence packet
+
+`evidence-packet.json` for a long page is several megabytes, more than a model's
+context window holds, so the harness never opens the file. `packet` returns one
+page of at most about 24 KB at a time and reports how many pages a view has:
+
+```sh
+scripts/pgvideo packet --request <id> --json                        # index: request, digests, review state, section list
+scripts/pgvideo packet --request <id> --section short-answer --json # one section, with the evidence and glossary IDs it uses
+scripts/pgvideo packet --request <id> --evidence "pg:src/backend/utils/misc/guc_tables.c#L3769-L3784" guc:track_activity_query_size --json
+scripts/pgvideo packet --request <id> --glossary --page 2 --json    # every glossary candidate, paged
+scripts/pgvideo packet --request <id> --glossary GIN --json         # one entry in full
+scripts/pgvideo packet --request <id> --settings --json             # the parsed configuration facts
+```
+
+The harness plans in two passes: it reads the index and every eligible section,
+noting each in a coverage ledger in `.scratch/<id>/state.md`, and then fetches
+evidence and glossary entries only for the content it keeps. If a harness session
+stops making progress on a small-context model, check that it is using `packet`
+and that its ledger is advancing; after a compaction it continues from the first
+section the ledger does not mark read.
 
 ### Fix a pronunciation
 
@@ -1080,6 +1104,7 @@ directories used to simulate escaping paths.
   from the extractive baseline, to cover `prepare` stopping at the evidence
   packet, eligibility and the kept static map, stable evidence digests, the
   refused extractive fallback, request constraints, snapshot-only excerpts,
+  the packet served in bounded pages,
   every plan check, every storyboard check, derived fields and stale digests,
   the review's coverage, separation, stale and malformed reviews, material and
   unsupported findings, the bounded repair rounds and a person's revision,

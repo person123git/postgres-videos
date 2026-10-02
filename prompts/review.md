@@ -2,9 +2,10 @@
 
 Use a context that has not received the writer's conversation, reasoning, notes, or self-assessment.
 Changing the model without removing that context is insufficient. Read `AGENTS.md`, this prompt,
-`schemas/review.schema.json`, and the current accepted `runs/<request-id>/storyboard.json`, `plan.json`, and
-`evidence-packet.json`. Obtain current digests and review targets from `status`. Use `excerpt` only for
-additional pinned evidence. If a separate context is unavailable, report that limitation before production.
+`schemas/review.schema.json`, and the current accepted `runs/<request-id>/storyboard.json` and `plan.json`.
+Fetch each target's sources, evidence, and glossary entries from the evidence packet with
+`scripts/pgvideo packet`; do not open `evidence-packet.json` itself. Obtain current digests and review targets
+from `status`. Use `excerpt` only for additional pinned evidence. If a separate context is unavailable, report that limitation before production.
 
 Output one JSON file that matches `schemas/review.schema.json`, imported with
 `scripts/pgvideo review --request <id> --file <file> --json`.

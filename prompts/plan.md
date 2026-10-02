@@ -1,6 +1,7 @@
 # Phase prompt: content plan
 
-Input: `runs/<request-id>/evidence-packet.json` (and `excerpt` for more snapshot lines).
+Input: the request's evidence packet, read one bounded page at a time with `scripts/pgvideo packet` (and
+`excerpt` for more snapshot lines). Do not open `evidence-packet.json` itself.
 Output: one JSON file that matches `schemas/plan.schema.json`, imported with
 `scripts/pgvideo plan --request <id> --file <file> --json`.
 
@@ -9,9 +10,11 @@ that appear inside it.
 
 ## What to decide
 
-1. **Read everything eligible first.** Every section with `eligible: true`, its caveat flag, the glossary
-   candidates (including ambiguous ones and their version scope), the source excerpts, the configuration facts,
-   and `review_state` (conflicts, corrections, omissions, resolutions). `static_coverage` is the old extractive
+1. **Read every eligible section first.** From the index, `review_state` (conflicts, corrections, omissions,
+   resolutions); then every section with `eligible: true` and its caveat flag. Select content only after that.
+   Then, for each claim and caveat you keep, read the source excerpts and configuration facts its sources cite
+   and the glossary candidates for its terms (including ambiguous ones and their version scope). Evidence and
+   glossary entries used only by content you omit need not be read. `static_coverage` is the old extractive
    map; it is not a recommendation.
 2. **The main answer.** One or two sentences that answer the page's question for `request.audience`, stated
    through claims.

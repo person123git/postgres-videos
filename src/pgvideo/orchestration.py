@@ -392,7 +392,7 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
     plan = (manifest.get("plan") or {}).get("status")
     if plan != "passed":
         reason = ("Write the content plan with prompts/plan.md and schemas/plan.schema.json from "
-                  f"runs/{rid}/evidence-packet.json." if plan is None else
+                  f"the evidence packet, read in pages with `{tool} packet --request {rid}`." if plan is None else
                   f"Revise the plan from runs/{rid}/plan-report.md, or report an infeasible plan to the user.")
         return [{"action": "author", "phase": "plan", "command": f"{tool} plan --request {rid} --file <plan.json>",
                  "reason": reason}]

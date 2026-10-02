@@ -153,6 +153,57 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("never substitutes", result["message"])
 
+    def test_packet_is_served_in_bounded_pieces(self):
+        _result, run_dir = self.prepare()
+        packet = self.load(run_dir, "evidence-packet.json")
+
+        def view(*options) -> dict:
+            status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
+            self.assertEqual((status, result["status"]), (0, "passed"), result)
+            return result["packet"]
+
+        # The index names every section without its blocks and carries what the plan copies.
+        index = view()
+        self.assertEqual([row["id"] for row in index["sections"]], [s["id"] for s in packet["sections"]])
+        self.assertEqual([row["blocks"] for row in index["sections"]], [len(s["blocks"]) for s in packet["sections"]])
+        self.assertEqual((index["digests"], index["request"], index["page"], index["pages"]),
+                         (packet["digests"], packet["request"], 1, 1))
+
+        # A section is returned unchanged, with the evidence its own units cite and nothing else.
+        read = next(s for s in packet["sections"] if s["id"] == "read-path")
+        section = view("--section", "read-path")
+        self.assertEqual(section["blocks"], read["blocks"])
+        cited = sorted(e["id"] for e in packet["evidence"]["excerpts"]
+                       if any(unit.split(".")[0] == "read-path" for unit in e["cited_by"]))
+        self.assertTrue(cited)
+        self.assertEqual(section["section"]["evidence"], cited)
+
+        # Evidence and glossary entries are fetched by ID or term, exactly as the packet holds them.
+        fetched = view("--evidence", cited[0], "guc:example_size")["evidence"]
+        self.assertEqual(fetched[0], next(e for e in packet["evidence"]["excerpts"] if e["id"] == cited[0]))
+        self.assertEqual(fetched[1]["id"], "guc:example_size")
+        self.assertEqual(view("--settings")["settings"], packet["evidence"]["settings"])
+        entry = packet["glossary"]["entries"][0]
+        listed = [item["entry"] for item in view("--glossary")["glossary"] if "entry" in item]
+        self.assertEqual([e["id"] for e in listed], [e["id"] for e in packet["glossary"]["entries"]])
+        self.assertNotIn("occurrences", listed[0])
+        full = view("--glossary", entry["term"].upper())["glossary"][0]["entry"]
+        self.assertEqual((full["definition"], full["occurrences"]), (entry["definition"], len(entry["occurrences"])))
+
+        # Pages hold whole items in order, and together they are the whole list.
+        with patch("pgvideo.packet.MAX_BYTES", 600):
+            first = view("--section", "read-path")
+            self.assertGreater(first["pages"], 1)
+            blocks = [b for page in range(1, first["pages"] + 1)
+                      for b in view("--section", "read-path", "--page", str(page))["blocks"]]
+        self.assertEqual(blocks, read["blocks"])
+
+        # An unknown section, evidence ID, term, or page fails; nothing is guessed.
+        for options in (("--section", "absent"), ("--evidence", "pg:src/absent.c#L1-L3"), ("--glossary", "absent"),
+                        ("--page", "9")):
+            status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
+            self.assertEqual((status, result["status"]), (1, "failed"), options)
+
     # Plan --------------------------------------------------------------------------------------
 
     def test_plan_contract(self):
