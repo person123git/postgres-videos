@@ -58,6 +58,28 @@ directory per PostgreSQL version), but they play different roles.
 - Editing `wiki_content/` changes no video and does not change the wiki. Wiki changes, including glossary
   corrections, are committed to the remote repository; a new `prepare` then picks them up.
 
+## Project layout
+
+| Folder | Contents |
+| --- | --- |
+| `src/pgvideo/` | The pgvideo Python package: CLI, evidence packet, checks, narration, rendering, and orchestration. |
+| `scripts/` | Entry points and environment code: the `pgvideo` wrapper, `setup`, and the sandbox and environment helpers. |
+| `tests/` | The test suite and its `fixtures/`. Run it with `scripts/pgvideo test`. |
+| `prompts/` | Phase instructions for the plan, draft, review, and repair. |
+| `schemas/` | JSON schemas for the plan, storyboard, review, and stage results. |
+| `templates/` | The HTML slide template used for rendering. |
+| `assets/` | Static render assets, such as fonts. |
+| `pronunciation/` | Narration pronunciation overrides, per language. |
+| `docs/` | The command and evidence reference (`harness.md`) and design documents. |
+| `wiki_content/` | The committed offline copy of the wiki; see the section above. |
+| `authored-inbox/`, `reviews-inbox/` | Committed storyboard and review input files. |
+| `.scratch/` | Your temporary files, one subdirectory per task or request. Not committed. |
+| `runs/` | One directory per request, `runs/<id>/`, owned by pgvideo. Not committed. |
+| `output/` | Delivered files, `output/<id>/`. Not committed. |
+| `.venv/` | The project virtual environment created by `scripts/setup`. Not committed. |
+| `.runtime/` | The project-local Python runtime, tools, browsers, and `tmp/`. Not committed. |
+| `cache/` | Downloads, models, wheels, and reusable narration and content. Not committed. |
+
 ## Temporary files
 
 - Use the repository-root `.scratch/` as the recommended temporary directory for project work, including
@@ -86,6 +108,12 @@ directory per PostgreSQL version), but they play different roles.
 - Save lengthy command output and logs under `.scratch/<id>/`, then inspect relevant matches or line ranges.
   For workflow results, read the complete `status`, `issues`, and `next_actions` before continuing; a shortened
   preview is not a substitute for the required result checks.
+- Never put more than 40 lines (about 2,000 characters) of file content in one tool call; the output limit
+  truncates longer calls and the call fails with "Unterminated string". For a longer file, create it with
+  the file-write tool holding only the first chunk, then append each following chunk with a separate
+  `cat >> <file> <<'EOF'` command. Do not draft the file's content in your reasoning first. After the last
+  chunk, check a JSON file with `jq empty <file>` before importing it. If a call is truncated, continue
+  with a smaller chunk; never resend the whole file.
 - Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
   Read each phase's required instructions before acting; do not preemptively load every referenced file.
 - Read all required source material in bounded chunks. Keep a coverage ledger in your state file: one line per
@@ -107,6 +135,9 @@ directory per PostgreSQL version), but they play different roles.
 - Run project commands through `scripts/pgvideo`. Read `scripts/pgvideo <command> --help` before first use.
 - Check the environment with `scripts/pgvideo doctor`. If provisioning is needed, use `scripts/setup` once,
   then check again. Do not install host packages, bypass the sandbox, or run project Python another way.
+- Run every script with the project virtual environment, `.venv/`. `scripts/pgvideo` already uses
+  `.venv/bin/python`. Run your own helper scripts with `.venv/bin/python <script>`, never with the host
+  `python` or `python3`. Do not install packages into `.venv/` yourself; `scripts/setup` owns it.
 - Model calls and credentials are your responsibility. pgvideo never calls a model. Only setup and prepare
   use the network for project downloads.
 - Read the prompt and schema for a phase before writing its input. Use the schema's exact field names and
