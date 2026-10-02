@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -160,6 +161,14 @@ class _Check:
     def _unit_section(self, unit_id: str) -> str | None:
         return (self.resolver.units.get(unit_id) or {}).get("section")
 
+    def _meant(self, source: str) -> str | None:
+        """The one unit ID that differs from a misspelled source only in punctuation or case, if there is one."""
+        def squash(text: str) -> str:
+            return re.sub(r"[^a-z0-9]+", "-", text.lower())
+
+        found = [unit for unit in self.resolver.units if squash(unit) == squash(source)]
+        return found[0] if len(found) == 1 else None
+
     def _claims(self) -> dict[str, dict]:
         claims: dict[str, dict] = {}
         for item in self.raw["claims"]:
@@ -171,7 +180,11 @@ class _Check:
             for source in item["sources"]:
                 unit = self.resolver.units.get(source)
                 if not unit:
-                    self.issue("blocking", "unknown_source", f"{source} is not a unit of the document.", **where)
+                    meant = self._meant(source)
+                    self.issue("blocking", "unknown_source", f"{source} is not a unit of the document.", **where,
+                               action=(f"Cite {meant}. " if meant else "Copy the unit ID from `packet --section`. ")
+                               + "Only a claim's own `id` is hyphenated; `sources` keep the document's unit IDs, "
+                                 "dots included.")
                     continue
                 section = self.sections.get(unit["section"]) or {}
                 if not section.get("eligible"):
@@ -308,7 +321,8 @@ class _Check:
                 continue
             self.issue("blocking", "section_unaccounted", f"Eligible section {section['id']} ({section['heading']}) "
                        "is neither selected nor omitted with a reason.", section=section["id"],
-                       action="Select claims from it, or add {section, reason} to omissions.")
+                       action="Select claims from it, or add {section, reason} to omissions. `packet --omissions-template "
+                              "--plan <file>` writes the patch that omits every unaccounted section.")
         return omissions
 
     def _caveats(self, claims: dict[str, dict], outline: list[dict]) -> None:
@@ -367,6 +381,39 @@ class _Check:
         return [{"section": s["id"], "heading": s["heading"], "eligible": s["eligible"], "caveat": s["caveat"],
                  "static_decision": (s.get("static_coverage") or {}).get("decision"),
                  "claims": used.get(s["id"], []), "omitted": omitted.get(s["id"])} for s in self.sections.values()]
+
+
+def omissions_template(root: Path, run_dir: Path, evidence: dict, raw: dict | None = None) -> dict:
+    """List the eligible sections a plan leaves unaccounted, as a `revise` patch that omits them.
+
+    Without a plan, every eligible section is listed. Each omission has an empty
+    reason, which the plan schema rejects: the harness removes the sections it
+    selects claims from and writes the reasons. The question and the page's own
+    summary cannot be omitted, so they are named under `essential` instead.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    units = Resolver(root, run_dir).units
+    sections = {section["id"]: section for section in evidence["sections"]}
+    question = (evidence["document"].get("question") or {}).get("section")
+    accounted = {item.get("section") for item in raw.get("omissions") or [] if isinstance(item, dict)}
+    for claim in raw.get("claims") or []:
+        for source in (claim.get("sources") or []) if isinstance(claim, dict) else []:
+            section = (units.get(source) or {}).get("section") if isinstance(source, str) else None
+            while section:
+                accounted.add(section)
+                section = (sections.get(section) or {}).get("parent")
+    open_ = [s for s in sections.values() if s["eligible"] and s["blocks"] and s["id"] not in accounted]
+    essential = [s for s in open_ if s["id"] == question or s["role"] == "summary"]
+    omit = [s for s in open_ if s not in essential]
+    return {
+        "notice": "Remove the sections you select claims from, apply the patch with `revise`, then set each reason. "
+                  "A section under `caveats` holds qualifications: omit it only if no kept claim needs them.",
+        "patch": [{"op": "add", "path": "omissions",
+                   "values": [{"section": s["id"], "reason": ""} for s in omit]}] if omit else [],
+        "sections": [{"id": s["id"], "heading": s["heading"], "words": s.get("words")} for s in omit],
+        "caveats": [s["id"] for s in omit if s["caveat"] or s["role"] == "open_questions"],
+        "essential": [s["id"] for s in essential],
+    }
 
 
 def accepted(run_dir: Path, manifest: dict) -> dict:

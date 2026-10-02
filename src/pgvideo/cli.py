@@ -162,8 +162,20 @@ def parser() -> argparse.ArgumentParser:
                             "full")
     piece.add_argument("--settings", action="store_true", help="the configuration facts parsed from the pinned "
                                                                "GUC table")
+    piece.add_argument("--omissions-template", action="store_true",
+                       help="a `revise` patch that omits, with empty reasons to fill in, every eligible section "
+                            "the plan given with --plan leaves unaccounted (every eligible section without --plan)")
+    packet.add_argument("--plan", type=Path, help="plan input file for --omissions-template")
     packet.add_argument("--page", type=int, default=1, help="page of the view (default: 1); the result reports "
                                                             "how many pages there are")
+    revise = subcommands.add_parser(
+        "revise", help="apply a small patch to a plan, storyboard, or review input file and write the result as a "
+                       "new revision, so a repair never retypes the file")
+    revise.add_argument("--from", dest="source", type=Path, required=True, help="input file to revise (unchanged)")
+    revise.add_argument("--patch", type=Path, required=True,
+                        help="JSON or YAML list of set, add, remove, and replace operations (docs/harness.md)")
+    revise.add_argument("--out", type=Path, required=True, help="new .json file to write, such as plan.v2.json")
+    revise.add_argument("--json", action="store_true", help=JSON_HELP)
     request_command("baseline", "draft the extractive regression baseline for comparison; never narrated")
     note = request_command("note", "record a visual or listening check of the rendered video that was actually "
                                    "performed")
@@ -619,8 +631,18 @@ def packet(args: argparse.Namespace, root: Path) -> int:
 
     try:
         run_dir, manifest = _request(root, args.request)
-        found = view(load_packet(run_dir, manifest), section=args.section, evidence=args.evidence,
-                     glossary=args.glossary, settings=args.settings, page=args.page)
+        if args.plan and not args.omissions_template:
+            raise ValueError("--plan is only used with --omissions-template.")
+        if args.omissions_template:
+            from . import contracts
+            from .planning import omissions_template
+
+            plan_file = contracts.project_file(root, args.plan, label="Plan file") if args.plan else None
+            raw = contracts.parse(plan_file.read_bytes(), str(args.plan)) if plan_file else None
+            found = {**omissions_template(root, run_dir, load_packet(run_dir, manifest), raw), "page": 1, "pages": 1}
+        else:
+            found = view(load_packet(run_dir, manifest), section=args.section, evidence=args.evidence,
+                         glossary=args.glossary, settings=args.settings, page=args.page)
     except (ValueError, OSError, KeyError) as error:
         if args.json:
             print(json.dumps({"request_id": args.request, "stage": "packet", "status": "failed", "artifacts": [],
@@ -638,6 +660,33 @@ def packet(args: argparse.Namespace, root: Path) -> int:
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
     if not args.json:
         print(message, file=sys.stderr)
+    return 0
+
+
+def revise(args: argparse.Namespace, root: Path) -> int:
+    """Patch a harness input file into a new revision; the harness imports it with the stage's own command."""
+    from .revise import revise as write_revision
+
+    try:
+        found = write_revision(root, args.source, args.patch, args.out)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        if args.json:
+            print(json.dumps({"request_id": None, "stage": "revise", "status": "failed", "artifacts": [],
+                              "issues": [{"severity": "blocking", "code": "revise", "message": str(error)}],
+                              "next_actions": [], "message": f"pgvideo: {error}"}, indent=2, ensure_ascii=False))
+        else:
+            print(f"pgvideo: {error}", file=sys.stderr)
+        return 1
+    message = (f"Wrote {found['file']} from {args.source} with {len(found['changes'])} operation(s) applied. "
+               "Import it with the stage's command.")
+    if args.json:
+        # A revision is the harness's own input, not a stage, so it is not kept as a request's last result.
+        print(json.dumps({"request_id": None, "stage": "revise", "status": "passed",
+                          "artifacts": [{"path": str(root / found["file"]), "sha256": found["sha256"]}],
+                          "issues": [], "next_actions": [], "message": message, "changes": found["changes"]},
+                         indent=2, ensure_ascii=False))
+    else:
+        print(message)
     return 0
 
 
@@ -1033,7 +1082,8 @@ def script(args: argparse.Namespace, root: Path) -> int:
 
 
 COMMANDS = {"prepare": prepare, "status": status, "plan": plan, "script": script, "review": review, "build": build,
-            "resume": resume, "replay": replay, "excerpt": excerpt, "packet": packet, "baseline": baseline,
+            "resume": resume, "replay": replay, "excerpt": excerpt, "packet": packet, "revise": revise,
+            "baseline": baseline,
             "note": note, "narrate": narrate, "timing": timing, "render": render, "validate": validate}
 
 

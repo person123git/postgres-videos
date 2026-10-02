@@ -119,7 +119,8 @@ directory per PostgreSQL version), but they play different roles.
 - Never rerun a failed command unchanged. When an import reports invalid JSON, run `jq empty <file>` and read
   20 lines on each side of the reported line. Check brackets before commas: every `{` and `[` opened above that
   line must be closed, and each entry must sit in the array the schema names for it. If the same error remains
-  after two fixes, stop patching punctuation: rewrite the whole enclosing entry in a new revision file.
+  after two fixes, stop patching punctuation: rewrite the whole enclosing entry in a new revision file. This is
+  for a file that is not valid JSON; once it parses, change it only with `scripts/pgvideo revise`.
 - End a turn only when the task is complete or a rule here tells you to stop. Do not end a turn by announcing a
   next step; perform it with a tool call in the same turn.
 - Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
@@ -188,8 +189,12 @@ Wrong:
   Python script in `.scratch/<id>/` that builds the object and calls
   `json.dump(obj, f, indent=2, ensure_ascii=False)`, instead of typing JSON by hand. Run it with
   `.venv/bin/python`. The script is file content too: the 40-line limit per tool call applies to it.
-- **Editing existing files.** Read the part you will change, and its enclosing entry, in bounded chunks first.
-  Prefer rewriting the whole enclosing entry in a new revision file over patching punctuation, so brackets stay
+- **Editing existing files.** Never retype a plan, storyboard, or review you already wrote: a whole file is
+  longer than your output limit, and a cut-off call writes nothing. Write a patch of at most 40 lines and apply
+  it with `scripts/pgvideo revise --from <file> --patch <patch> --out <new revision> --json`; the paths and
+  operations are in [prompts/repair.md](prompts/repair.md). `revise` writes valid JSON under the new filename
+  and leaves the old file unchanged. For other JSON files, read the part you will change, and its enclosing
+  entry, in bounded chunks first, and rewrite that entry rather than patching punctuation, so brackets stay
   balanced. Keep existing key names and structure unless asked to change them. This applies only to your own
   input files; never edit the JSON pgvideo owns under `runs/<id>/`.
 
@@ -342,7 +347,13 @@ Build only after pgvideo accepts the current plan, storyboard, and independent r
 
 ## 5. Repair only when a result requests it
 
-- Follow [prompts/repair.md](prompts/repair.md). Change only the items named in the findings.
+- Follow [prompts/repair.md](prompts/repair.md) for a plan, storyboard, or review that failed or needs review.
+  Change only the items named in the findings.
+- Patch, never retype: write the changes as a small patch and apply it with `scripts/pgvideo revise`, which
+  writes the next revision. A result folds repeated issues into one issue with a `count`, the IDs it names, and
+  `examples`; fix the rule they show with one `[*]` operation, not one edit per entry.
+- For a plan's unaccounted sections, use `scripts/pgvideo packet --request "<id>" --omissions-template --plan
+  "<file>"`; it writes the patch that omits them, and you set the reasons.
 - Import the revision as a new input file. Revalidate dependent stages; every changed storyboard needs a new
   independent review. If a fix requires a different plan, revise and import the plan first.
 - Allow at most two storyboard repair rounds after a failed content review. Use the budget recorded in `status`

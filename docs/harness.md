@@ -43,6 +43,8 @@ the user; a person must decide), or `deliver`.
 | `status --request <id>` | Stage statuses, artifacts with SHA-256, unresolved issues, next actions, repair budgets, the digests a plan, storyboard, or review must name, and the review targets. Changes nothing. | — |
 | `excerpt --request <id> --path <file> --lines <a>-<b>` | Prints snapshot lines (at most 400) and their evidence ID and SHA-256. A file outside the snapshot is reported as missing evidence. | — |
 | `packet --request <id> [--section <id> \| --evidence <id>… \| --glossary [<term>…] \| --settings] [--page <n>]` | Prints one page (at most about 24 KB of compact JSON) of the evidence packet: the index with the request, digests, review state, and one row per section; one section's blocks with the evidence and glossary IDs its units use; excerpts or configuration facts by ID; glossary candidates; or all configuration facts. Text is returned unchanged. | — |
+| `packet --request <id> --omissions-template [--plan <file>]` | Prints a `revise` patch that adds an omission, with an empty reason, for every eligible section the plan given with `--plan` neither selects nor omits (every eligible section without `--plan`). It also lists those sections' headings, the ones that hold caveats, and the `essential` ones (the question and the page's summary), which cannot be omitted. Changes nothing. | — |
+| `revise --from <file> --patch <patch> --out <new.json>` | Applies a patch (a JSON or YAML list of `set`, `add`, `remove`, and `replace` operations, or an object with the list under `patch`) to a plan, storyboard, or review input file and writes the result as a new file. The source is unchanged; `--out` must not exist and must be outside `runs/` and `output/`. Nothing is written unless every operation matches. Takes no `--request`. | the `--out` file |
 | `plan --request <id> --file <plan.json>` | Validates and records the content plan. | `plan.json`, `plan-report.md`, `authored/plan.json` |
 | `script --request <id> --storyboard <file> [--duration-rewrite] [--human-revision]` | Validates and records a harness storyboard. Never starts narration. `--drafter-command <exe>` runs an optional adapter instead. | `draft-input.json`, `storyboard.json`, `script.md`, `authored/storyboard.json` |
 | `review --request <id> --file <review.json>` | Validates the separate review and decides the content gate. | `content-review.json`, `content-report.md`, `authored/review.json` |
@@ -52,6 +54,29 @@ the user; a person must decide), or `deliver`.
 | `baseline --request <id>` | Drafts the old extractive script for comparison. Never narrated or delivered. | `baseline/storyboard.json`, `baseline/script.md` |
 | `note --request <id> --kind visual\|listening --text "…"` | Records a media check that was actually performed, after delivery. | `orchestration.json` |
 | `narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage. The same content gate applies. | as `build` |
+
+A result folds issues that share a severity and code into one issue when there are more than three: it has a
+`count`, the first three messages as `examples`, the scenes, claims, or sections named (`claims`, `sections`, …),
+and the first `action`. The stage's record and report keep every issue. Schema violations are grouped the same
+way: one line per rule, with `*` for the list position, the number of places, and the first place.
+
+### Revision patches
+
+A path is keys joined by dots; after a list, a selector in brackets picks entries: `[2]` a position (`[-1]` the
+last), `[*]` every entry, `[id=size-sets-slot]` the entries whose key has that value, `[=short-answer.1.s1]`
+the entries equal to a value. A selector's value may contain dots.
+
+```json
+[
+  {"op": "set", "path": "claims[*].assessment.glossary", "value": "not_applicable"},
+  {"op": "replace", "path": "claims[*].sources[*]", "find": "_", "with": "."},
+  {"op": "add", "path": "omissions", "value": {"section": "details", "reason": "Beyond a summary."}},
+  {"op": "remove", "path": "claims[id=old-claim]"}
+]
+```
+
+`set` may create the last key of its path; `add` takes `value` or a list of `values`; `replace` changes literal
+text in strings. An operation that matches nothing fails the whole patch.
 
 Defaults: detail `standard`; audience "PostgreSQL users and administrators who know SQL"; target 3 minutes for
 `summary`, 8 for `standard`, none for `full`; tolerance ±15%; voice `af_heart`, language `a`, speed 1.0.

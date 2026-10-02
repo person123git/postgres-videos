@@ -41,13 +41,28 @@ def _registry(root: Path) -> Registry:
 
 
 def errors(root: Path, name: str, value) -> list[str]:
-    """Return schema violations as `path: message` lines, at most MAX_ERRORS of them."""
+    """Return schema violations as `path: message` lines, at most MAX_ERRORS of them.
+
+    Violations of one rule at the same place in different list entries are one line: the
+    path with `*` for the entry, how many places break the rule, and the first as an example.
+    A rule's `description` in the schema follows its message.
+    """
     validator = Draft202012Validator(schema(root, name), registry=_registry(root))
     found = sorted(validator.iter_errors(value), key=lambda error: [str(p) for p in error.absolute_path])
-    lines = [f"{'/'.join(str(part) for part in error.absolute_path) or '(top level)'}: {error.message}"
-             for error in found[:MAX_ERRORS]]
-    if len(found) > MAX_ERRORS:
-        lines.append(f"… and {len(found) - MAX_ERRORS} more")
+    groups: dict[tuple, list] = {}
+    for error in found:
+        rule = "/".join("*" if isinstance(part, int) else str(part) for part in error.absolute_path)
+        groups.setdefault((rule, error.validator, json.dumps(error.validator_value, sort_keys=True, default=str)),
+                          []).append(error)
+    lines = []
+    for (rule, _validator, _value), same in list(groups.items())[:MAX_ERRORS]:
+        first = same[0]
+        path = "/".join(str(part) for part in first.absolute_path) or "(top level)"
+        note = first.schema.get("description") if isinstance(first.schema, dict) else None
+        where = path if len(same) == 1 else f"{rule} ({len(same)} places, first {path})"
+        lines.append(f"{where}: {first.message}" + (f" ({note})" if note else ""))
+    if len(groups) > MAX_ERRORS:
+        lines.append(f"… and {len(groups) - MAX_ERRORS} more rules")
     return lines
 
 

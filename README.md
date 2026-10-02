@@ -80,6 +80,8 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo replay --request <id> --from <other-id>` | Revalidates another request's accepted content for this request when the evidence, prompts, and review policy match. No new inference. | no |
 | `scripts/pgvideo excerpt --request <id> --path <file> --lines <a>-<b>` | Prints lines of a PostgreSQL file from the request's snapshot with their evidence ID. | no |
 | `scripts/pgvideo packet --request <id> [--section <id> \| --evidence <id>… \| --glossary [<term>…] \| --settings] [--page <n>]` | Prints one bounded page of the evidence packet: its index, one section, evidence by ID, glossary candidates, or configuration facts. | no |
+| `scripts/pgvideo packet --request <id> --omissions-template [--plan <file>]` | Prints a `revise` patch that omits, with empty reasons to fill in, every eligible section the plan leaves unaccounted. | no |
+| `scripts/pgvideo revise --from <file> --patch <patch> --out <new.json>` | Applies a small patch to a plan, storyboard, or review input file and writes a new revision. The source file is unchanged. | no |
 | `scripts/pgvideo baseline --request <id>` | Drafts the old extractive script for comparison. It is never narrated or delivered. | no |
 | `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records a visual or listening check that was actually performed on the delivered video. | no |
 | `scripts/pgvideo narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage and the ones after it. The content gate applies. | no |
@@ -94,12 +96,13 @@ command, and a failed check stops the command. `scripts/pgvideo <command> --help
 lists a command's options.
 
 The harness-facing commands (`prepare`, `status`, `plan`, `script`, `review`,
-`build`, `resume`, `replay`, `excerpt`, `packet`, `baseline`, `note`) take `--json`. They
+`build`, `resume`, `replay`, `excerpt`, `packet`, `revise`, `baseline`, `note`) take `--json`. They
 then print one structured result on standard output, with `request_id`,
 `stage`, `status`, `artifacts`, `issues`, `next_actions`, and a `message`
 ([schemas/stage-result.schema.json](schemas/stage-result.schema.json)), and keep
 it as `runs/<id>/last-result.json`. Progress lines go to standard error. `excerpt`
-and `packet` only read, so their results are not kept.
+and `packet` only read, and `revise` writes only the harness's own input file, so
+their results are not kept.
 
 ### `prepare` options
 
@@ -234,8 +237,8 @@ audio cache. What stops a request and what happens next:
 | --- | --- | --- |
 | Source snapshot or document | `source-report.md`, `coverage.md` | The wiki page needs a fix, such as a version conflict or missing evidence. Fix the page, then prepare a new request. |
 | Glossary cross-check | `glossary-check.md` | Decide each blocking issue and record it in `runs/<id>/resolutions.yaml` (the report gives a snippet for each), then ask the harness to resume, or run `scripts/pgvideo resume --request <id>`. The harness may propose a resolution, but only you record it. |
-| Plan | `plan-report.md` | The harness fixes what it can. An infeasible plan, a contradicted claim, or missing evidence is reported to you: change the target or detail, or accept the omission. |
-| Storyboard | `script.md` | The harness repairs the named issues and imports again. |
+| Plan | `plan-report.md` | The harness fixes what it can, with a patch (see below). An infeasible plan, a contradicted claim, or missing evidence is reported to you: change the target or detail, or accept the omission. |
+| Storyboard | `script.md` | The harness patches the named issues into a new revision and imports it. |
 | Content review | `content-report.md` | The harness gets two repair rounds; then it reports the remaining findings for your decision. |
 | Measured length | `status` | One rewrite of optional detail; then you may accept the length (`build --accept-duration`). |
 | Media validation | `quality-report.json` | The media is valid, but loudness or silence is out of range. Repeat the narration with other settings, or revise the script. |
@@ -261,6 +264,59 @@ evidence and glossary entries only for the content it keeps. If a harness sessio
 stops making progress on a small-context model, check that it is using `packet`
 and that its ledger is advancing; after a compaction it continues from the first
 section the ledger does not mark read.
+
+### Repair a plan or storyboard with a patch
+
+A repair changes a few values, so the harness never types a plan, storyboard, or
+review again: a whole file can be longer than a small model's output limit, and a
+call cut off at the limit writes nothing. It writes a short patch and `revise`
+applies it to a new revision. The source file is unchanged, the new file must not
+exist, and nothing is written unless every operation matches:
+
+```sh
+scripts/pgvideo revise --from .scratch/<id>/plan.v1.json --patch .scratch/<id>/fix1.json --out .scratch/<id>/plan.v2.json --json
+scripts/pgvideo plan --request <id> --file .scratch/<id>/plan.v2.json --json
+```
+
+```json
+[
+  {"op": "replace", "path": "claims[*].sources[*]", "find": "_", "with": "."},
+  {"op": "set", "path": "claims[id=size-sets-slot].kind", "value": "answer"},
+  {"op": "add", "path": "omissions", "value": {"section": "details", "reason": "Beyond a summary."}},
+  {"op": "remove", "path": "claims[id=old-claim]"}
+]
+```
+
+| Operation | Effect |
+| --- | --- |
+| `set` with `value` | Puts the value at the path. The last key may be new. |
+| `add` with `value` or `values` | Appends to the list at the path. |
+| `remove` | Deletes the entries or keys at the path. |
+| `replace` with `find` and `with` | Replaces literal text in the strings at the path. |
+
+A path is keys joined by dots. After a list, a selector in brackets picks entries:
+`[2]` a position, `[*]` every entry, `[id=size-sets-slot]` the entries whose key
+has that value, and `[=short-answer.1.s1]` the entries equal to a value.
+
+For a long page, the harness does not type the omission list either.
+`packet --omissions-template` prints a patch that omits every eligible section a
+plan neither selects nor omits, each with an empty reason; the harness applies it
+and then sets the reasons. The plan schema rejects an empty reason. The question
+and the page's own summary cannot be omitted, so the template lists them under
+`essential`:
+
+```sh
+scripts/pgvideo packet --request <id> --omissions-template --plan .scratch/<id>/plan.v1.json > .scratch/<id>/omit.json
+scripts/pgvideo revise --from .scratch/<id>/plan.v1.json --patch .scratch/<id>/omit.json --out .scratch/<id>/plan.v2.json --json
+```
+
+Results stay small for the same reason. When more than three issues share a
+severity and code, the result holds one issue with a `count`, the first three
+messages as `examples`, and the claims, sections, or scenes they name; schema
+violations of one rule in many list entries are one line. The stage's record and
+report (`plan-report.md`, `script.md`, `content-report.md`) keep every issue. If a
+session on a small model ends while repairing, look for a response that stopped
+at the output limit; the fix is a patch, not a higher limit.
 
 ### Fix a pronunciation
 
@@ -335,7 +391,8 @@ credentials; `--drafter-command` adapters run offline too. See
 | The harness does not follow the workflow | Tell it to read `AGENTS.md`; not every harness loads it automatically. |
 | "not a separate review" | Use a fresh session, subagent, or model invocation with no writer conversation, reasoning, notes, or self-assessment. Changing the model alone is insufficient. Report it if this separation is unavailable. |
 | The model is unavailable, or credentials or quota ran out | Progress is saved. Fix the harness's model access and ask it to continue the request; `status` shows where it stopped. |
-| "does not match schemas/…" | The harness wrote malformed JSON or included fields pgvideo computes, such as statuses. It rewrites the file from the schema. |
+| "does not match schemas/…" | The harness wrote malformed JSON or included fields pgvideo computes, such as statuses. It patches the file into a new revision with `revise`. One rule broken in many entries is reported as one line. |
+| A session on a small model ends in the middle of a repair, with nothing written | The response stopped at the model's output limit while retyping a file. Tell the harness to repair with a patch and `scripts/pgvideo revise` (see [Repair a plan or storyboard with a patch](#repair-a-plan-or-storyboard-with-a-patch)). |
 | "insufficient_evidence" or "missing evidence" | A claim needs a file or range that is not in the pinned snapshot. The claim is left out, or you decide what to do; pgvideo never substitutes other documentation. |
 | "made from other evidence", "reviews another storyboard" | A file is stale: a stage before it changed. Write it again from the current files; `status` lists the digests. |
 | The repair budget is used | The remaining findings need your decision; a revision you make is imported with `--human-revision`. |
@@ -1105,7 +1162,9 @@ directories used to simulate escaping paths.
   packet, eligibility and the kept static map, stable evidence digests, the
   refused extractive fallback, request constraints, snapshot-only excerpts,
   the packet served in bounded pages,
-  every plan check, every storyboard check, derived fields and stale digests,
+  every plan check, a repair read from a compact result and patched into a new
+  revision with `revise` and the omissions template, every storyboard check,
+  derived fields and stale digests,
   the review's coverage, separation, stale and malformed reviews, material and
   unsupported findings, the bounded repair rounds and a person's revision,
   resume and replay without inference, a new instruction version, the

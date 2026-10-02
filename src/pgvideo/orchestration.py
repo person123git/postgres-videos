@@ -38,6 +38,11 @@ VERSION_LINE = re.compile(r"(?m)^<!-- instructions-version: (\d+) -->\s*$")
 REVIEW_POLICY = 1
 # Storyboard revisions allowed after a failed content review, and rewrites after a measured-duration miss.
 MAX_REPAIR_ROUNDS = 2
+# A result folds more issues of one severity and code than this into a single issue.
+ISSUE_GROUP_LIMIT = 3
+ISSUE_EXAMPLES = 3
+ISSUE_SUBJECTS = ("scene", "narration", "target", "claim", "section")
+STAGE_REPORTS = {"plan": "plan-report.md", "script": "script.md", "content_review": "content-report.md"}
 MAX_DURATION_REWRITES = 1
 DURATION_TOLERANCE = 0.15
 DEFAULT_AUDIENCE = "PostgreSQL users and administrators who know SQL"
@@ -357,9 +362,41 @@ def _issues(run_dir: Path, stage: str, record: dict) -> list[dict]:
             loaded = {}
         for issue in loaded.get("issues", []):
             if issue.get("severity") in ("blocking", "warning"):
-                issues.append({key: issue.get(key) for key in ("severity", "code", "message", "scene", "narration",
-                                                               "target", "action") if issue.get(key) is not None})
-    return issues
+                issues.append({key: issue.get(key) for key in ("severity", "code", "message", *ISSUE_SUBJECTS,
+                                                               "action") if issue.get(key) is not None})
+    return compact_issues(issues, report=STAGE_REPORTS.get(stage))
+
+
+def compact_issues(issues: list[dict], *, report: str | None = None) -> list[dict]:
+    """Fold issues that share a severity and code into one, when there are more than ISSUE_GROUP_LIMIT.
+
+    A result is read by a model with a small context, and one mistake repeated in every
+    claim or section otherwise fills it. The folded issue keeps the count, every scene,
+    claim, or section it names, the first messages as examples, and the first action.
+    The stage's record and report keep each issue in full.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for issue in issues:
+        groups.setdefault((issue.get("severity"), issue.get("code")), []).append(issue)
+    compacted = []
+    for (severity, code), same in groups.items():
+        if len(same) <= ISSUE_GROUP_LIMIT:
+            compacted += same
+            continue
+        examples = list(dict.fromkeys(issue["message"] for issue in same))[:ISSUE_EXAMPLES]
+        folded = {"severity": severity, "code": code, "count": len(same),
+                  "message": f"{len(same)} issues with this code; `examples` holds the first {len(examples)}."
+                             + (f" {report} lists each one." if report else ""),
+                  "examples": examples}
+        for subject in ISSUE_SUBJECTS:
+            named = list(dict.fromkeys(issue[subject] for issue in same if issue.get(subject)))
+            if named:
+                folded[subject + "s"] = named
+        action = next((issue["action"] for issue in same if issue.get("action")), None)
+        if action:
+            folded["action"] = action
+        compacted.append(folded)
+    return compacted
 
 
 def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
@@ -393,14 +430,16 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
     if plan != "passed":
         reason = ("Write the content plan with prompts/plan.md and schemas/plan.schema.json from "
                   f"the evidence packet, read in pages with `{tool} packet --request {rid}`." if plan is None else
-                  f"Revise the plan from runs/{rid}/plan-report.md, or report an infeasible plan to the user.")
+                  f"Revise the plan from runs/{rid}/plan-report.md with prompts/repair.md: patch it into a new revision "
+                  f"with `{tool} revise`, never retype it. Or report an infeasible plan to the user.")
         return [{"action": "author", "phase": "plan", "command": f"{tool} plan --request {rid} --file <plan.json>",
                  "reason": reason}]
     script = (manifest.get("script") or {}).get("status")
     if script != "passed":
         reason = ("Write the storyboard with prompts/draft.md and schemas/storyboard.schema.json from the "
                   f"accepted runs/{rid}/plan.json." if script is None else
-                  f"Repair the blocking issues in runs/{rid}/script.md.")
+                  f"Repair the blocking issues in runs/{rid}/script.md with prompts/repair.md: patch the storyboard "
+                  f"into a new revision with `{tool} revise`, never retype it.")
         return [{"action": "author", "phase": "draft",
                  "command": f"{tool} script --request {rid} --storyboard <storyboard.json>", "reason": reason}]
     review = manifest.get("content_review") or {}

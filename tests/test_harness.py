@@ -257,6 +257,110 @@ class HarnessTests(unittest.TestCase):
                 imported(change)
         self.assertEqual(self.load(run_dir, "manifest.json")["plan"]["status"], "failed")
 
+    def test_a_repair_reads_a_compact_result_and_patches_a_new_revision(self):
+        _result, run_dir = self.prepare()
+        plan, _storyboard = recorded_content(self.workspace, run_dir)
+        rid, folder = run_dir.name, authored(self.workspace, run_dir, "x").parent
+
+        # One mistake in every claim is one schema line, with the rule's own explanation.
+        dotted = copy.deepcopy(plan)
+        for claim in dotted["claims"]:
+            claim["id"] = claim["id"].replace("c", "c.")
+        status, result, _stderr = self.command("plan", "--request", rid, "--file",
+                                               str(write(folder / "dotted.json", dotted)))
+        self.assertEqual(status, 1)
+        self.assertIn(f"claims/*/id ({len(plan['claims'])} places, first claims/0/id)", result["message"])
+        self.assertIn("keep their dots", result["message"])
+
+        # Unit IDs renamed to look like claim IDs, and no omissions: the result folds each code into one issue.
+        broken = copy.deepcopy(plan)
+        for claim in broken["claims"]:
+            claim["sources"] = [source.replace(".", "_") for source in claim["sources"]]
+        broken["omissions"] = []
+        source = write(folder / "plan.v1.json", broken)
+        before = source.read_bytes()
+        status, result, _stderr = self.command("plan", "--request", rid, "--file", str(source))
+        self.assertEqual((status, result["status"]), (3, "needs_review"))
+        codes = [issue["code"] for issue in result["issues"]]
+        self.assertEqual(len(codes), len(set(codes)), codes)
+        unknown = next(issue for issue in result["issues"] if issue["code"] == "unknown_source")
+        renamed = sum(1 for c in plan["claims"] for s in c["sources"] if "." in s)
+        self.assertEqual((unknown["count"], len(unknown["examples"])), (renamed, 3))
+        self.assertLessEqual(set(unknown["claims"]), {claim["id"] for claim in plan["claims"]})
+        self.assertRegex(unknown["action"], r"^Cite \S+\.\S+\. Only a claim's own `id` is hyphenated")
+        self.assertIn("plan-report.md", unknown["message"])
+        # The record keeps every issue.
+        self.assertEqual(sum(1 for i in self.load(run_dir, "plan.json")["issues"] if i["code"] == "unknown_source"),
+                         renamed)
+
+        # The template omits what the plan leaves unaccounted; the question cannot be omitted.
+        status, result, _stderr = self.command("packet", "--request", rid, "--omissions-template", "--plan",
+                                               str(source))
+        self.assertEqual(status, 0, result)
+        template = result["packet"]
+        packet = self.load(run_dir, "evidence-packet.json")
+        eligible = {s["id"] for s in packet["sections"] if s["eligible"] and s["blocks"]}
+        offered = {value["section"] for value in template["patch"][0]["values"]}
+        self.assertEqual(offered | set(template["essential"]), eligible)
+        self.assertIn("question", template["essential"])
+        self.assertIn("known-limitations", template["caveats"])
+        self.assertTrue(all(value["reason"] == "" for value in template["patch"][0]["values"]))
+        status, result, _stderr = self.command("packet", "--request", rid, "--omissions-template", "--plan",
+                                               str(write(folder / "good.json", plan)))
+        self.assertEqual((result["packet"]["patch"], result["packet"]["essential"]), ([], []))
+
+        def revise(operations, out: str, origin: Path = source) -> tuple[int, dict]:
+            patch_file = write(folder / f"patch-{out}", operations)
+            status, result, _stderr = self.command("revise", "--from", str(origin), "--patch", str(patch_file),
+                                                   "--out", str(folder / out))
+            return status, result
+
+        # A few operations repair every claim; the source file is untouched and the revision imports.
+        wanted = ["known-limitations", "details"]
+        status, result = revise([
+            {"op": "replace", "path": "claims[*].sources[*]", "find": "_", "with": "."},
+            {"op": "add", "path": "omissions", "values": [{"section": s, "reason": ""} for s in wanted]},
+            {"op": "set", "path": "omissions[reason=].reason", "value": "Left out of this video."},
+        ], "plan.v2.json")
+        self.assertEqual((status, result["status"]), (0, "passed"), result)
+        self.assertEqual([change["matched"] for change in result["changes"]][1:], [1, len(wanted)])
+        self.assertEqual(source.read_bytes(), before)
+        revised = json.loads((folder / "plan.v2.json").read_text(encoding="utf-8"))
+        self.assertEqual([c["sources"] for c in revised["claims"]], [c["sources"] for c in plan["claims"]])
+        status, result, _stderr = self.command("plan", "--request", rid, "--file", str(folder / "plan.v2.json"))
+        self.assertEqual((status, result["status"]), (0, "passed"), result)
+
+        # Nothing is guessed or overwritten: an existing revision, a pgvideo-owned path, a path that matches
+        # nothing, and a malformed operation all fail and write no file.
+        one = [{"op": "set", "path": "claims[0].kind", "value": "fact"}]
+        failures = (
+            (one, "plan.v2.json", "already exists"),
+            (one, f"../../runs/{rid}/plan.v9.json", "pgvideo owns runs/"),
+            ([{"op": "remove", "path": "claims[id=absent]"}], "plan.v3.json", "matches nothing"),
+            ([*one, {"op": "set", "path": "claims[*].assessment.absent.key", "value": 1}], "plan.v3.json",
+             "matches nothing"),
+            ([{"op": "rename", "path": "claims"}], "plan.v3.json", "needs an `op`"),
+            ([{"op": "add", "path": "claims[0].id", "value": "x"}], "plan.v3.json", "is not a list"),
+        )
+        for operations, out, message in failures:
+            with self.subTest(message=message, out=out):
+                status, result = revise(operations, out)
+                self.assertEqual((status, result["status"]), (1, "failed"))
+                self.assertIn(message, result["message"])
+        self.assertFalse((folder / "plan.v3.json").exists() or (run_dir / "plan.v9.json").exists())
+
+        # Selectors: a position, a key's value containing dots, and a plain value in a list of strings.
+        first = plan["claims"][0]
+        status, result = revise([
+            {"op": "remove", "path": f"claims[id={first['id']}].sources[={first['sources'][0]}]"},
+            {"op": "set", "path": "outline[-1].purpose", "value": "Close."},
+            {"op": "set", "path": "claims[1].note", "value": {"new": True}},
+        ], "plan.v4.json", folder / "good.json")
+        self.assertEqual(status, 0, result)
+        selected = json.loads((folder / "plan.v4.json").read_text(encoding="utf-8"))
+        self.assertEqual(selected["claims"][0]["sources"], first["sources"][1:])
+        self.assertEqual((selected["outline"][-1]["purpose"], selected["claims"][1]["note"]), ("Close.", {"new": True}))
+
     # Storyboard --------------------------------------------------------------------------------
 
     def test_storyboard_contract(self):

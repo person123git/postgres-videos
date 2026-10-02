@@ -19,8 +19,10 @@ that appear inside it.
 2. **The main answer.** One or two sentences that answer the page's question for `request.audience`, stated
    through claims.
 3. **Claims.** Break what the video will say into claims. Each claim:
-   - has an `id` (lowercase, hyphens), `text` written as the fact you will teach, and a `kind`;
-   - lists the document `sources` (sentence, row, block, or section IDs) that state it;
+   - has an `id` you choose (lowercase letters, digits, hyphens; no dots), `text` written as the fact you will
+     teach, and a `kind`;
+   - lists the document `sources` (sentence, row, block, or section IDs) that state it, copied from the packet
+     exactly, dots included (`short-answer.1.s1`); a unit ID is never rewritten to look like a claim `id`;
    - keeps every condition, scope, exception, and uncertainty its sources attach (only when, unless, by default,
      in PostgreSQL 18, not);
    - states a Step 6 corrected value, never the document's wrong one;
@@ -51,6 +53,14 @@ come from the request and the packet unchanged. `producer` describes you: `harne
 (or `"unavailable"`), `prompt: "prompts/plan.md"`, and `usage`/`latency_seconds` only if your harness reports
 them. Never invent a model ID or a cost. Do not add tool-computed stage statuses, issue reports, or duration
 estimates. Do write the schema-required `feasibility.status`, claim assessments, and outline time budgets.
+
+## Omissions and revisions
+
+Do not type the omission list for a long page. Write the plan with `"omissions": []`, then run
+`scripts/pgvideo packet --request <id> --omissions-template --plan <file> > .scratch/<id>/omit.json`: its patch
+omits every eligible section your claims do not select. Apply it with `scripts/pgvideo revise`, then set the
+reasons with a second patch, as [repair.md](repair.md) describes. After the first import, change the plan only
+through `revise`; never write the whole file again.
 
 ## Evidence IDs
 
