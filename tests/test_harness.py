@@ -42,7 +42,7 @@ class HarnessTests(unittest.TestCase):
         self.workspace.mkdir()
         install_project_files(self.workspace)
         self.github = FakeGitHub()
-        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=PAGE, glossary=GLOSSARY), refs=["master"])
+        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=PAGE, glossary=GLOSSARY), refs=["main"])
         self.github.add(POSTGRES, PIN, postgres_snapshot())
         self.enterContext(patch("pgvideo.sources._http_get", side_effect=self.github))
         self.enterContext(patch("pgvideo.sources._github_contents",

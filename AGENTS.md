@@ -1,4 +1,4 @@
-<!-- instructions-version: 3 -->
+<!-- instructions-version: 5 -->
 # AGENTS.md: pgvideo workflow
 
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
@@ -49,6 +49,31 @@ stage statuses, generates Kokoro narration, renders the video, and delivers the 
 - Let pgvideo manage its runtime temporary files through `scripts/pgvideo`; the wrapper configures
   `.runtime/tmp/`. The `.scratch/` recommendation applies to files you create while working on the project.
 
+## Mandatory Context management
+
+- For multi-step work, keep a concise `.scratch/<id>/state.md` with the objective, user constraints, request ID,
+  decisions, completed work, next action, and relevant file paths or line ranges. Update it at stage boundaries
+  and before compaction when possible. Keep task notes out of `AGENTS.md`.
+  Independent reviewers instead keep their own state in `.scratch/<id>/review-<n>/state.md`, using a separate
+  directory for each review. They must never read the writer's state or other task notes.
+- Search with `rg` before reading files. Normally read 100–200 lines per call using explicit offsets and limits;
+  expand or continue when needed. Avoid repeatedly loading entire files already inspected.
+- Save lengthy command output and logs under `.scratch/<id>/`, then inspect relevant matches or line ranges.
+  For workflow results, read the complete `status`, `issues`, and `next_actions` before continuing; a shortened
+  preview is not a substitute for the required result checks.
+- Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
+  Read each phase's required instructions before acting; do not preemptively load every referenced file.
+- Read all required source material in bounded chunks. Track coverage and source pointers in task notes;
+  context limits never justify skipping eligible sections, caveats, evidence, corrections, or resolutions.
+- After compaction or interruption, reread only your own task state. For video recovery, use it to identify the
+  request, then obtain current workflow status as described below before acting. Verify relevant source text
+  before editing or making claims. Notes and summaries are navigation aids, not authoritative evidence or
+  replacements for exact text.
+- For video recovery, make the first workflow command
+  `scripts/pgvideo status --request "<id>" --json`; follow the recovery and instruction-version rules below.
+  Use its result for current stages, digests, repair budgets, and next actions. Preserve independent review
+  isolation: do not give the reviewer the writer's task notes.
+
 ## Tool use and file ownership
 
 - Run project commands through `scripts/pgvideo`. Read `scripts/pgvideo <command> --help` before first use.
@@ -95,7 +120,8 @@ scripts/pgvideo prepare --document "<document-path-or-blob-URL>" --json
 Save the returned `request_id`. The request directory is `runs/<id>/`. Preparation snapshots and checks the
 sources and writes `evidence-packet.json`; it does not write the video content.
 
-For an existing or interrupted request, start with:
+For an existing or interrupted request, first read your own task state, if available, to identify the request.
+Then run this as the first workflow command:
 
 ```sh
 scripts/pgvideo status --request "<id>" --json
@@ -157,6 +183,8 @@ Continue only when the script passes. This command does not start narration.
 Start a fresh session or subagent with conversation inheritance disabled. A different model is also allowed,
 but it must not receive the writer's conversation, reasoning, notes, or self-assessment. Reviewing again in
 the writer's context does not meet this requirement. If no separate context is available, stop before building.
+The reviewer must not read the writer's `.scratch/<id>/state.md` or other task notes. If the reviewer needs
+recovery notes, use their own `.scratch/<id>/review-<n>/state.md` in a separate directory for each review.
 
 Give the reviewer these instructions, [prompts/review.md](prompts/review.md),
 [schemas/review.schema.json](schemas/review.schema.json), the current accepted `storyboard.json` and `plan.json`,

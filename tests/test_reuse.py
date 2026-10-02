@@ -155,7 +155,7 @@ class ReuseTests(unittest.TestCase):
         self.workspace.mkdir()
         install_media_files(self.workspace)
         self.github = FakeGitHub()
-        self.github.add(WIKI, WIKI_COMMIT, self.wiki(), refs=["master"])
+        self.github.add(WIKI, WIKI_COMMIT, self.wiki(), refs=["main"])
         self.github.add(POSTGRES, PIN, postgres_files())
         self.kokoro = FakeKokoro()
         self.enterContext(patch("pgvideo.sources._http_get", side_effect=self.github))
@@ -295,7 +295,7 @@ class ReuseTests(unittest.TestCase):
         before = self.manifest(first)
         # A later commit changes only the glossary: the document bytes stay the same.
         self.github.add(WIKI, "c" * 40, self.wiki(glossary=GLOSSARY_TEXT.replace(
-            "A backend is the server process", "A backend is the server-side process")), refs=["master"])
+            "A backend is the server process", "A backend is the server-side process")), refs=["main"])
         second, stdout = self.generate()
         after = self.manifest(second)
         self.assertEqual(after["reuse"]["components"]["document"], before["reuse"]["components"]["document"])
@@ -305,7 +305,7 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(after["glossary"]["glossary"]["sha256"], after["reuse"]["components"]["glossary"]["sha256"])
 
         # A snapshot whose glossary contradicts the unchanged document stops at the cross-check.
-        self.github.add(WIKI, "d" * 40, self.wiki(glossary=ABSENT_GLOSSARY), refs=["master"])
+        self.github.add(WIKI, "d" * 40, self.wiki(glossary=ABSENT_GLOSSARY), refs=["main"])
         third, stdout = self.generate(expect=cli.NEEDS_REVIEW)
         manifest = self.manifest(third)
         self.assertEqual(manifest["glossary_check"]["status"], "needs_review")

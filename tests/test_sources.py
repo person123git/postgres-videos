@@ -417,6 +417,8 @@ class SnapshotTests(unittest.TestCase):
 
     def test_prepare_command_reports_status(self):
         def contents(path, ref):
+            if ref == "main":
+                return None
             return {"type": "file", "path": path}
 
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))

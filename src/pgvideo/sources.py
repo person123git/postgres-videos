@@ -19,7 +19,8 @@ from .paths import project_directory
 REPOSITORY = "person123git/postgres-llm-wiki"
 # GitHub's mirror of git.postgresql.org, which rate-limits automated downloads.
 POSTGRES_REPOSITORY = "postgres/postgres"
-DEFAULT_REF = "master"
+DEFAULT_REF = "main"
+FALLBACK_REF = "master"
 API = "https://api.github.com"
 RAW = "https://raw.githubusercontent.com"
 API_ROOT = f"{API}/repos/{REPOSITORY}/contents"
@@ -144,9 +145,22 @@ def resolve_document(value: str, explicit_ref: str | None = None) -> Document:
         _check_ref(explicit_ref)
     if "://" not in value:
         path = _check_path(value)
-        ref = explicit_ref or DEFAULT_REF
-        _validate_file(path, ref)
-        return Document(path, ref)
+        if explicit_ref is not None:
+            _validate_file(path, explicit_ref)
+            return Document(path, explicit_ref)
+        first_error: SourceError | None = None
+        for ref in (DEFAULT_REF, FALLBACK_REF):
+            try:
+                _validate_file(path, ref)
+                return Document(path, ref)
+            except SourceError as error:
+                # Only a missing document is eligible for the compatibility fallback.
+                # Directory, file-type, validation, and network errors must remain visible.
+                if f"Document '{path}' was not found at ref '{ref}'." not in str(error):
+                    raise
+                first_error = first_error or error
+        assert first_error is not None
+        raise first_error
 
     url = urlsplit(value)
     if url.scheme != "https" or url.netloc.lower() != "github.com":

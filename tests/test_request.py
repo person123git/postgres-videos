@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from contextlib import chdir, redirect_stderr
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from pgvideo.cli import create_request, parser
 from pgvideo.sources import SourceError, resolve_document
@@ -16,11 +16,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def fake_contents(path, ref):
     files = {
+        ("wiki/example.md", "main"),
         ("wiki/example.md", "master"),
         ("wiki/example.md", "feature/video"),
-        ("wiki/example.txt", "master"),
+        ("wiki/example.txt", "main"),
+        ("wiki/legacy.md", "master"),
     }
-    if path == "wiki" and ref == "master":
+    if path == "wiki" and ref == "main":
         return []
     if (path, ref) in files:
         return {"type": "file", "path": path}
@@ -51,17 +53,18 @@ class RequestTests(unittest.TestCase):
         )
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
-    def test_relative_path_defaults_to_master_and_writes_request(self, lookup):
+    def test_relative_path_defaults_to_main_and_writes_request(self, lookup):
         request_path = create_request(self.request_args("video-output"), workspace=self.workspace)
         data = json.loads(request_path.read_text(encoding="utf-8"))
         self.assertEqual(data["document"]["path"], "wiki/example.md")
-        self.assertEqual(data["document"]["ref"], "master")
+        self.assertEqual(data["document"]["ref"], "main")
         self.assertEqual(data["repository"], "person123git/postgres-llm-wiki")
         self.assertEqual(data["settings"]["voice"], "af_heart")
         self.assertEqual(data["settings"]["output_dir"], str(self.workspace / "video-output"))
         self.assertEqual(request_path.parent.name, data["request_id"])
         self.assertFalse((request_path.parent / ".request.json.tmp").exists())
         self.assertEqual(lookup.call_count, 1)
+        lookup.assert_called_once_with("wiki/example.md", "main")
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
     def test_level_of_detail_is_recorded_and_defaults_to_standard(self, _lookup):
@@ -202,6 +205,10 @@ class RequestTests(unittest.TestCase):
             "https://github.com/person123git/postgres-llm-wiki/blob/feature/video/wiki/example.md"
         )
         self.assertEqual((document.path, document.ref), ("wiki/example.md", "feature/video"))
+        document = resolve_document(
+            "https://github.com/person123git/postgres-llm-wiki/blob/master/wiki/example.md"
+        )
+        self.assertEqual((document.path, document.ref), ("wiki/example.md", "master"))
         with self.assertRaisesRegex(SourceError, "conflicts"):
             resolve_document(
                 "https://github.com/person123git/postgres-llm-wiki/blob/master/wiki/example.md",
@@ -215,6 +222,21 @@ class RequestTests(unittest.TestCase):
             resolve_document(
                 "https://github.com/person123git/postgres-llm-wiki/blob/master/wiki/%2A.md"
             )
+
+    @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
+    def test_explicit_ref_overrides_default_and_is_recorded(self, lookup):
+        args = self.request_args()
+        args.ref = "master"
+        request_path = create_request(args, workspace=self.workspace)
+        data = json.loads(request_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["document"]["ref"], "master")
+        lookup.assert_called_once_with("wiki/example.md", "master")
+
+    @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
+    def test_default_ref_falls_back_to_master_when_main_is_missing(self, lookup):
+        document = resolve_document("wiki/legacy.md")
+        self.assertEqual((document.path, document.ref), ("wiki/legacy.md", "master"))
+        self.assertEqual(lookup.call_args_list, [call("wiki/legacy.md", "main"), call("wiki/legacy.md", "master")])
 
     @patch("pgvideo.sources._github_contents", side_effect=fake_contents)
     def test_rejects_missing_directory_and_non_markdown(self, _lookup):

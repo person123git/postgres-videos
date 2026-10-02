@@ -104,7 +104,7 @@ it as `runs/<id>/last-result.json`. Progress lines go to standard error.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--document` | required | A repository-relative `.md` path, or an HTTPS GitHub blob URL in `person123git/postgres-llm-wiki`. |
-| `--ref` | `master` | The branch, tag, or commit for a relative path. A blob URL uses its own ref; a different `--ref` is rejected. |
+| `--ref` | `main`, then `master` | The branch, tag, or commit for a relative path. If no `--ref` is supplied, a missing document is retried on `master`. A blob URL uses its own ref; a different `--ref` is rejected. |
 | `--detail` | `standard` | `summary`: the main answer and its qualifications. `standard`: the mechanism and useful examples. `full`: every eligible section, with no duration ceiling. |
 | `--audience` | PostgreSQL users and administrators who know SQL | Who the video is for; the plan and review must keep it. |
 | `--target-minutes` | 3 for `summary`, 8 for `standard`, none for `full` | The duration target. The plan, the script estimate, and the measured narration must stay within ±15%. Rejected with `full`. |
@@ -254,7 +254,7 @@ Unit IDs are listed in `runs/<id>/narration/audio-map.json`.
 ### Use an updated glossary
 
 Commit the change to `wiki/glossary.md` in the wiki, then prepare a new request
-with a ref that contains it, such as the default `master`. Every `prepare`
+with a ref that contains it, such as the default `main` (with `master` as a fallback). Every `prepare`
 downloads the glossary at the resolved commit; `resume` and the other
 `--request` commands keep the glossary their request downloaded. A changed
 glossary changes the evidence digest, so accepted content is not replayed and

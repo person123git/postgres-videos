@@ -494,7 +494,7 @@ class DocumentTests(unittest.TestCase):
         self.assertFalse((run_dir / "document.json").exists())
 
     def test_prepare_command_writes_the_coverage_map(self):
-        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=TEXT), refs=["master"])
+        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=TEXT), refs=["main"])
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
         self.enterContext(patch("pgvideo.cli.local_selection"))
         self.enterContext(patch("pgvideo.cli._narrate", return_value=0))
@@ -512,7 +512,7 @@ class DocumentTests(unittest.TestCase):
 
         self.github.add(WIKI, "e" * 40, wiki_files(document=TEXT.split("## Short Answer")[0].replace(
             "In PostgreSQL 18, how is `example_size` used?", "") + f"## Source References\n\n- [g]({GUC})\n"),
-            refs=["master"])
+            refs=["main"])
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             self.assertEqual(prepare(args, self.workspace), NEEDS_REVIEW)

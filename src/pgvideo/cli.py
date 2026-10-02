@@ -29,7 +29,7 @@ from pathlib import Path
 
 from .paths import REQUEST_ID, project_directory, project_root
 from .assets import AssetError, local_selection
-from .sources import REPOSITORY, SourceError, resolve_document
+from .sources import DEFAULT_REF, FALLBACK_REF, REPOSITORY, SourceError, resolve_document
 
 # Exit status for a request that needs a documented resolution before it can continue.
 NEEDS_REVIEW = 3
@@ -88,7 +88,9 @@ def parser() -> argparse.ArgumentParser:
         "prepare", help="create a harness request for one document: snapshot, parse, match and cross-check the "
                         "glossary, and write the evidence packet; stops before any content is written")
     prepare.add_argument("--document", required=True, help="wiki-relative .md path or GitHub blob URL")
-    prepare.add_argument("--ref", help="branch, tag, or commit (defaults to master for relative paths)")
+    prepare.add_argument(
+        "--ref", help=f"branch, tag, or commit (defaults to {DEFAULT_REF}; tries {FALLBACK_REF} if missing)"
+    )
     prepare.add_argument("--voice", default="af_heart", help="Kokoro voice (default: af_heart)")
     prepare.add_argument("--language", default="a", help="Kokoro language code (default: a, American English)")
     prepare.add_argument("--speed", type=positive_speed, default=1.0, help="speaking speed (default: 1.0)")

@@ -424,7 +424,7 @@ class MatchTests(unittest.TestCase):
         self.assertEqual((manifest["status"], manifest["glossary"]["status"]), ("failed", "failed"))
 
     def test_prepare_command_reports_glossary_matches(self):
-        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=TEXT, glossary=GLOSSARY), refs=["master"])
+        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=TEXT, glossary=GLOSSARY), refs=["main"])
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
         self.enterContext(patch("pgvideo.cli.local_selection"))
         self.enterContext(patch("pgvideo.cli._narrate", return_value=0))

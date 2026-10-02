@@ -537,7 +537,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual((manifest["status"], manifest["glossary_check"]["status"]), ("failed", "failed"))
 
     def test_prepare_needs_review_and_resume_continues_the_same_request(self):
-        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=BLOCKING, glossary=GLOSSARY), refs=["master"])
+        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=BLOCKING, glossary=GLOSSARY), refs=["main"])
         self.enterContext(patch("pgvideo.cli.project_root", return_value=self.workspace))
         self.enterContext(patch("pgvideo.cli.local_selection"))
         self.enterContext(patch("pgvideo.cli._narrate", return_value=0))

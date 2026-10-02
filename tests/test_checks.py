@@ -43,7 +43,7 @@ class FixtureChecks(unittest.TestCase):
         install_project_files(self.workspace)
         self.wiki = tree("wiki")
         self.github = FakeGitHub()
-        self.github.add(WIKI, WIKI_COMMIT, self.wiki, refs=["master"])
+        self.github.add(WIKI, WIKI_COMMIT, self.wiki, refs=["main", "master"])
         self.github.add(POSTGRES, PIN, tree("postgres"))
         self.enterContext(patch("pgvideo.sources._http_get", side_effect=self.github))
         self.enterContext(patch("pgvideo.sources._github_contents", side_effect=self.contents))
@@ -52,8 +52,8 @@ class FixtureChecks(unittest.TestCase):
         self.narrate = self.enterContext(patch("pgvideo.cli._narrate", return_value=0))
 
     def contents(self, path, ref):
-        """Answer GitHub's contents API from the fixture tree at master."""
-        if ref != "master":
+        """Answer GitHub's contents API from the fixture tree at main or master."""
+        if ref not in {"main", "master"}:
             return None
         if path in self.wiki:
             return {"type": "file", "path": path}
@@ -79,7 +79,7 @@ class FixtureChecks(unittest.TestCase):
 
     def test_invalid_requests_fail_before_creating_a_request(self):
         cases = [
-            ((f"{CHECKS}/missing.md",), "was not found at ref 'master'"),
+            ((f"{CHECKS}/missing.md",), "was not found at ref 'main'"),
             ((CHECKS,), "is a directory"),
             ((f"{CHECKS}/notes.txt",), "is not a Markdown (.md) file"),
             ((f"{CHECKS}/*.md",), "globs are not supported"),
