@@ -94,8 +94,10 @@ directory per PostgreSQL version), but they play different roles.
 ## Mandatory Context management
 
 - For multi-step work, keep a concise `.scratch/<id>/state.md` with the objective, user constraints, request ID,
-  decisions, completed work, next action, and relevant file paths or line ranges. Update it at stage boundaries
-  and before compaction when possible. Keep task notes out of `AGENTS.md`.
+  decisions, completed work, next action, and relevant file paths or line ranges. Create it as the first action
+  of the task, before the first `packet` read or input file; a compaction summary is not a substitute. Update it
+  at stage boundaries, after every failed command with the exact error and what you will change, and before
+  compaction when possible. Keep task notes out of `AGENTS.md`.
   Independent reviewers instead keep their own state in `.scratch/<id>/review-<n>/state.md`, using a separate
   directory for each review. They must never read the writer's state or other task notes.
 - Search with `rg` before reading files. Pass an explicit offset and a limit of at most 200 lines on every file
@@ -114,13 +116,20 @@ directory per PostgreSQL version), but they play different roles.
   `cat >> <file> <<'EOF'` command. Do not draft the file's content in your reasoning first. After the last
   chunk, check a JSON file with `jq empty <file>` before importing it. If a call is truncated, continue
   with a smaller chunk; never resend the whole file.
+- Never rerun a failed command unchanged. When an import reports invalid JSON, run `jq empty <file>` and read
+  20 lines on each side of the reported line. Check brackets before commas: every `{` and `[` opened above that
+  line must be closed, and each entry must sit in the array the schema names for it. If the same error remains
+  after two fixes, stop patching punctuation: rewrite the whole enclosing entry in a new revision file.
+- End a turn only when the task is complete or a rule here tells you to stop. Do not end a turn by announcing a
+  next step; perform it with a tool call in the same turn.
 - Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
   Read each phase's required instructions before acting; do not preemptively load every referenced file.
 - Read all required source material in bounded chunks. Keep a coverage ledger in your state file: one line per
   eligible section with its ID, whether it is read, keep or omit, and for kept content the sentence, row, and
   evidence IDs you will use. Update the ledger after each section, before fetching the next one. Context limits
   never justify skipping eligible sections, caveats, corrections, resolutions, or the evidence of kept content.
-- After compaction or interruption, reread only your own task state. Continue from the first section the ledger
+- After compaction or interruption, reread only your own task state. If it does not exist, create it from the
+  current `status` result before doing anything else. Continue from the first section the ledger
   does not mark read; never start the packet again from the beginning. For video recovery, use the state to
   identify the request, then obtain current workflow status as described below before acting. Verify relevant source text
   before editing or making claims. Notes and summaries are navigation aids, not authoritative evidence or
@@ -129,6 +138,60 @@ directory per PostgreSQL version), but they play different roles.
   `scripts/pgvideo status --request "<id>" --json`; follow the recovery and instruction-version rules below.
   Use its result for current stages, digests, repair budgets, and next actions. Preserve independent review
   isolation: do not give the reviewer the writer's task notes.
+
+## Writing JSON files
+
+Every `.json` file you write must be strict, valid JSON (RFC 8259). After writing or editing one, validate it:
+
+```sh
+jq empty path/to/file.json && echo OK
+```
+
+If validation fails, follow the invalid-JSON rule in the section above, fix the file, and validate again.
+Never import a JSON file, or finish a task, while a JSON file you wrote is invalid.
+
+- Use double quotes for all keys and strings, never single quotes.
+- Put no trailing comma after the last item in an object or array.
+- Write no comments (`//` or `/* */`); JSON does not support them.
+- Escape special characters inside strings: `\"` for quotes, `\\` for backslashes, `\n` for newlines. Never put
+  a raw line break inside a string.
+- Use lowercase `true`, `false`, and `null`, never `True`, `None`, `NaN`, or `undefined`.
+- Leave numbers unquoted (`42`, not `"42"`) unless the schema says string.
+- Write only the JSON into the file: no Markdown fences and no explanation text before or after it.
+- Indent with 2 spaces and end the file with a single newline.
+- Write dates as ISO 8601 strings, `"2026-10-02"` or `"2026-10-02T14:30:00Z"`, unless the schema says otherwise.
+
+Correct:
+
+```json
+{
+  "name": "widget",
+  "count": 3,
+  "enabled": true,
+  "tags": ["a", "b"],
+  "note": "She said \"hi\"\nthen left"
+}
+```
+
+Wrong:
+
+```
+{
+  'name': 'widget',   // comment
+  "count": "3",
+  "enabled": True,
+  "tags": ["a", "b",],
+}
+```
+
+- **Large or generated files.** For a file over about 100 lines, or one built from data, you may write a short
+  Python script in `.scratch/<id>/` that builds the object and calls
+  `json.dump(obj, f, indent=2, ensure_ascii=False)`, instead of typing JSON by hand. Run it with
+  `.venv/bin/python`. The script is file content too: the 40-line limit per tool call applies to it.
+- **Editing existing files.** Read the part you will change, and its enclosing entry, in bounded chunks first.
+  Prefer rewriting the whole enclosing entry in a new revision file over patching punctuation, so brackets stay
+  balanced. Keep existing key names and structure unless asked to change them. This applies only to your own
+  input files; never edit the JSON pgvideo owns under `runs/<id>/`.
 
 ## Tool use and file ownership
 
