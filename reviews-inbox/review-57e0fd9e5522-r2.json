@@ -1,0 +1,3402 @@
+{
+ "schema": "pgvideo/review/v1",
+ "request_id": "20261001T145602Z-57e0fd9e5522",
+ "storyboard_digest": "b7c1780b43a150972c695e88398012e60beba44b46a8105e7d7c8cdddd0ed6a8",
+ "plan_digest": "d35940a9620a6161b40c53719d22fc5a81603f9ea87b8e7fa1b1292a66adfe43",
+ "evidence_digest": "1e483f7c595a877567ec46a6984b75f565b926c42616282c6dcb4d9c179d2f24",
+ "reviewer": {
+  "separation": "fresh_context",
+  "writer_context_shared": false,
+  "writer_self_assessment_seen": false
+ },
+ "producer": {
+  "harness": {
+   "name": "Claude Code",
+   "version": "unavailable"
+  },
+  "model": {
+   "requested": "claude-sonnet-5-5",
+   "resolved": "claude-sonnet-5-5",
+   "provider": "anthropic"
+  },
+  "prompt": "prompts/review.md",
+  "parameters": "unavailable",
+  "usage": "unavailable",
+  "latency_seconds": "unavailable"
+ },
+ "findings": [
+  {
+   "target": "narration:join-methods.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r1",
+    "step-6-parameterized-index-paths-for-joins.1.s1"
+   ],
+   "justification": "Nested loop is the method that passes outer values to a parameterized inner index scan and covers inner, left, semi and anti joins, not right, right-anti or full.",
+   "issues": []
+  },
+  {
+   "target": "narration:join-methods.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r5",
+    "85-eligibility-and-comparison.1.r4",
+    "q2-why-hash-joins-e81-e82.3.s1",
+    "fractional-cost-for-a-cursor-e17.10.s2"
+   ],
+   "justification": "Hash join needs a hashjoinable clause and builds from the inner input; merge join needs mergejoinable clauses and sorted inputs from index or sort.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-methods:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r1"
+   ],
+   "justification": "Nested loop executes inner per outer row.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-methods:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-parameterized-index-paths-for-joins.1.s1"
+   ],
+   "justification": "Index condition takes its value from the current outer row.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-methods:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.3.s1"
+   ],
+   "justification": "Hash join builds then returns rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-methods:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r4"
+   ],
+   "justification": "Mergejoinable clause and sorted inputs.",
+   "issues": []
+  },
+  {
+   "target": "narration:join-comparison.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.6.r1",
+    "q2-why-hash-joins-e81-e82.6.r2",
+    "q2-why-hash-joins-e81-e82.6.r3"
+   ],
+   "justification": "Hash 2349.02, merge 4777.52 with enable_hashjoin off, nested loop 5021.12 with both others off.",
+   "issues": []
+  },
+  {
+   "target": "narration:join-comparison.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.5.s1",
+    "q2-why-hash-joins-e81-e82.7.s1",
+    "51-main-idea.3.s2"
+   ],
+   "justification": "Estimated under forced settings; hash wins on lowest total; costs are not time.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-comparison:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.5.s1"
+   ],
+   "justification": "Items-orders join priced with each method.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-comparison:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.6.r1"
+   ],
+   "justification": "Hash total 2349.02.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-comparison:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.6.r2"
+   ],
+   "justification": "Merge total 4777.52.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-comparison:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "q2-why-hash-joins-e81-e82.6.r3"
+   ],
+   "justification": "Nested loop total 5021.12.",
+   "issues": []
+  },
+  {
+   "target": "narration:memoize.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r3",
+    "85-eligibility-and-comparison.1.r2",
+    "56-exceptions-and-limitations.1.r7"
+   ],
+   "justification": "Materialize rescans cheaper; Memoize needs hashable keys, at least two outer rows, parameter or lateral references, no volatile inner functions.",
+   "issues": []
+  },
+  {
+   "target": "narration:memoize.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "memoize-estimated-against-measured-hits-e84.2",
+    "memoize-estimated-against-measured-hits-e84.1.s7",
+    "step-7-lateral-supplies-outer-values-memoize-can-reuse-results.2.s4",
+    "step-7-lateral-supplies-outer-values-memoize-can-reuse-results.2.s5"
+   ],
+   "justification": "loops=6000, Hits 5505, Misses 495, Evictions 0, forced serial, no default leg, complete entry returns cached rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:memoize:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "56-exceptions-and-limitations.1.r7"
+   ],
+   "justification": "Materialize rescans cheaper.",
+   "issues": []
+  },
+  {
+   "target": "screen:memoize:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r3"
+   ],
+   "justification": "Memoize caches parameterized inner results.",
+   "issues": []
+  },
+  {
+   "target": "screen:memoize:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "85-eligibility-and-comparison.1.r3"
+   ],
+   "justification": "Hashable keys and no volatile inner functions.",
+   "issues": []
+  },
+  {
+   "target": "screen:memoize:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "memoize-estimated-against-measured-hits-e84.2"
+   ],
+   "justification": "Hits 5505, Misses 495.",
+   "issues": []
+  },
+  {
+   "target": "narration:sublinks.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-try-to-turn-in-and-exists-into-joins.1.s2",
+    "step-1-try-to-turn-in-and-exists-into-joins.2.s1",
+    "step-1-try-to-turn-in-and-exists-into-joins.2.s2",
+    "step-1-try-to-turn-in-and-exists-into-joins.3.s3",
+    "step-4-why-not-in-stays-a-subplan.1.s1"
+   ],
+   "justification": "Top-level WHERE/ON through AND; ANY becomes semi join; refusals for volatility, outer relations, WITH; NOT converted only for EXISTS.",
+   "issues": []
+  },
+  {
+   "target": "narration:sublinks.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-correlated-in-is-new-in-17.1.s2",
+    "step-4-why-not-in-stays-a-subplan.1.s3"
+   ],
+   "justification": "The 17 correlated IN case (LATERAL) and NOT IN keeping a SubPlan even over NOT NULL columns match the page.",
+   "issues": [
+    {
+     "code": "unsupported",
+     "severity": "minor",
+     "message": "'return the same rows' for the page's two Q3 examples is an inference; the page states only that NOT NULL declarations are not examined and shows the two plans."
+    }
+   ]
+  },
+  {
+   "target": "screen:sublinks:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-try-to-turn-in-and-exists-into-joins.2.s1",
+    "step-1-try-to-turn-in-and-exists-into-joins.3.s2"
+   ],
+   "justification": "IN becomes semi join; EXISTS merges tables directly.",
+   "issues": []
+  },
+  {
+   "target": "screen:sublinks:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-why-not-in-stays-a-subplan.1.s1",
+    "step-3-a-semi-join-is-implemented-directly-or-after-making-one-side-unique.2"
+   ],
+   "justification": "NOT EXISTS becomes JOIN_ANTI.",
+   "issues": []
+  },
+  {
+   "target": "screen:sublinks:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-try-to-turn-in-and-exists-into-joins.1.s2",
+    "step-1-try-to-turn-in-and-exists-into-joins.3.s3"
+   ],
+   "justification": "Top-level only; volatile or WITH refused.",
+   "issues": []
+  },
+  {
+   "target": "screen:sublinks:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-why-not-in-stays-a-subplan.1.s2",
+    "step-4-why-not-in-stays-a-subplan.1.s3"
+   ],
+   "justification": "NOT IN stays a SubPlan.",
+   "issues": []
+  },
+  {
+   "target": "narration:subplan-initplan.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.1.s1",
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.3.5.1.s1",
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.3.1.1.s1",
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.4.s3"
+   ],
+   "justification": "Remaining sublinks become SubPlans or InitPlans; directly correlated SubPlan sets input Params and rescans; empty parParam allows an InitPlan read lazily.",
+   "issues": []
+  },
+  {
+   "target": "narration:subplan-initplan.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.4.s2",
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.4.s3",
+    "open-questions.20.5.1.s1",
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.3.3.1.s1"
+   ],
+   "justification": "Indirect correlation marks output pending on rescan; not measured; ANY hashed with hashable strict operators and output fitting hash_mem.",
+   "issues": []
+  },
+  {
+   "target": "screen:subplan-initplan:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.1.s1"
+   ],
+   "justification": "make_subplan handles remaining sublinks.",
+   "issues": []
+  },
+  {
+   "target": "screen:subplan-initplan:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.3.5.1.s1"
+   ],
+   "justification": "Directly correlated SubPlan sets input Params.",
+   "issues": []
+  },
+  {
+   "target": "screen:subplan-initplan:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.3.1.1.s1"
+   ],
+   "justification": "Empty parParam gives an InitPlan.",
+   "issues": []
+  },
+  {
+   "target": "screen:subplan-initplan:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-plan-the-remaining-sublinks-as-subplans-or-initplans.4.s2"
+   ],
+   "justification": "ExecReScan propagates the changed dependency.",
+   "issues": []
+  },
+  {
+   "target": "narration:cte-choice.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-decide-how-each-cte-is-planned.1.s3",
+    "step-8-decide-how-each-cte-is-planned.2.1.1.s1",
+    "step-8-decide-how-each-cte-is-planned.2.2.1.s1",
+    "step-8-decide-how-each-cte-is-planned.2.3.1.s1",
+    "step-8-decide-how-each-cte-is-planned.2.4.1.s1",
+    "open-questions.20.1.1.s2"
+   ],
+   "justification": "Inlining conditions match, including NOT MATERIALIZED still refused for recursive, FOR UPDATE, DML, volatile, outer self-reference.",
+   "issues": []
+  },
+  {
+   "target": "narration:cte-choice.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-decide-how-each-cte-is-planned.3.s1",
+    "step-9-plan-a-data-modifying-cte-as-its-own-subplan.1.s2",
+    "step-9-plan-a-data-modifying-cte-as-its-own-subplan.1.s3"
+   ],
+   "justification": "Non-inlined CTE planned once as InitPlan; data-modifying CTE has own ModifyTable run to completion even if unread.",
+   "issues": [
+    {
+     "code": "other",
+     "severity": "minor",
+     "message": "'The spelling of WITH alone does not tell you which behavior applies' is a synthesized takeaway, not stated."
+    }
+   ]
+  },
+  {
+   "target": "screen:cte-choice:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-decide-how-each-cte-is-planned.2.1.1.s1"
+   ],
+   "justification": "Default no option and one reference inlines.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-choice:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.20.1.1.s2"
+   ],
+   "justification": "Safety restrictions still apply to NOT MATERIALIZED.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-choice:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-decide-how-each-cte-is-planned.2.2.1.s1",
+    "step-8-decide-how-each-cte-is-planned.2.3.1.s1",
+    "step-9-plan-a-data-modifying-cte-as-its-own-subplan.1.s1"
+   ],
+   "justification": "Recursive, locking, DML or volatile CTEs are not inlined.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-choice:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-decide-how-each-cte-is-planned.3.s1"
+   ],
+   "justification": "Other CTEs planned once as InitPlan.",
+   "issues": []
+  },
+  {
+   "target": "narration:cte-estimates.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-what-the-outer-query-learns-from-a-materialized-cte.1.s2",
+    "step-9-what-the-outer-query-learns-from-a-materialized-cte.1.s3",
+    "step-9-what-the-outer-query-learns-from-a-materialized-cte.2.s2",
+    "96-exceptions-and-limitations.1.r10"
+   ],
+   "justification": "In 17 CTE statistics and pathkeys pass upward; fence only promises the outer query cannot change the CTE's plan.",
+   "issues": []
+  },
+  {
+   "target": "narration:cte-estimates.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "92-values-and-structures.1.r10",
+    "step-10-recursive-ctes.1.s4",
+    "96-exceptions-and-limitations.1.r9"
+   ],
+   "justification": "recursive_worktable_factor default 10, ten iterations assumed, fixed guesses; E9.10 31 rows estimated.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-estimates:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-what-the-outer-query-learns-from-a-materialized-cte.1.s2"
+   ],
+   "justification": "Row estimate and pathkeys from CTE plan.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-estimates:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-what-the-outer-query-learns-from-a-materialized-cte.2.s2"
+   ],
+   "justification": "Outer query cannot change CTE plan.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-estimates:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-10-recursive-ctes.1.s3"
+   ],
+   "justification": "WorkTable Scan estimate is recursive_worktable_factor times non-recursive rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:cte-estimates:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "96-exceptions-and-limitations.1.r9"
+   ],
+   "justification": "31 rows estimated for a chain limited to 50 levels.",
+   "issues": []
+  },
+  {
+   "target": "narration:upper-ordering.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-decide-the-useful-orderings-before-the-join-search.1.s2",
+    "step-1-decide-the-useful-orderings-before-the-join-search.2.s1",
+    "101-main-idea.1.s2",
+    "step-7-distinct-order-by-and-limit.2.s1"
+   ],
+   "justification": "standard_qp_callback pathkeys let an ordered path survive even when dearer; fixed upper-step order then LockRows, Limit, ModifyTable.",
+   "issues": []
+  },
+  {
+   "target": "narration:upper-ordering.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-place-projections-and-set-returning-functions.1.s2",
+    "step-7-distinct-order-by-and-limit.1.s3",
+    "101-main-idea.2.s3",
+    "106-exceptions-and-limitations.1.r6"
+   ],
+   "justification": "Projection folded or separate Result; presorted, incremental or full sort; limit_tuples not passed down past grouping, aggregates, windows or SRFs.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-ordering:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-decide-the-useful-orderings-before-the-join-search.2.s1"
+   ],
+   "justification": "Useful order lets a dearer path survive.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-ordering:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "101-main-idea.1.s1",
+    "101-main-idea.1.s2"
+   ],
+   "justification": "Fixed order of upper steps.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-ordering:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-distinct-order-by-and-limit.2.s1"
+   ],
+   "justification": "LockRows, Limit, ModifyTable.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-ordering:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "101-main-idea.2.s3"
+   ],
+   "justification": "Presorted, incremental, fully sorted variants.",
+   "issues": []
+  },
+  {
+   "target": "narration:partial-index.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.4.s2",
+    "step-2-prove-partial-index-predicates.4.s10",
+    "step-6-revalidate-choose-build.3.s1",
+    "step-6-revalidate-choose-build.3.s3"
+   ],
+   "justification": "Custom plan folds actual values; a forced generic plan cannot prove status = 'pending' from status = $1.",
+   "issues": []
+  },
+  {
+   "target": "narration:partial-index.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.4.s4",
+    "75-eligibility-and-comparison.6.r5",
+    "75-eligibility-and-comparison.1.s1"
+   ],
+   "justification": "A generic parameter is not a universal rejection; value-independent proofs can succeed; eligibility flags decide before cost.",
+   "issues": []
+  },
+  {
+   "target": "screen:partial-index:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-revalidate-choose-build.3.s2"
+   ],
+   "justification": "Custom plan builds with actual values via boundParams.",
+   "issues": []
+  },
+  {
+   "target": "screen:partial-index:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.4.s2"
+   ],
+   "justification": "B-tree proof gives up when the side is not a Const.",
+   "issues": []
+  },
+  {
+   "target": "screen:partial-index:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.4.s10"
+   ],
+   "justification": "E7.10 compares status = 'pending' with status = $1.",
+   "issues": []
+  },
+  {
+   "target": "screen:partial-index:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.4.s4"
+   ],
+   "justification": "Value-independent predicate can still be implied.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-only.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-turn-matches-into-index-paths.3.s1",
+    "76-exceptions-and-limitations.1.r11",
+    "68-planning-versus-execution.1.r3"
+   ],
+   "justification": "Returnable columns required; enable_indexonlyscan off builds no path; planning uses stored all-visible fraction, execution checks live visibility map.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-only.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "68-planning-versus-execution.2.s2",
+    "68-planning-versus-execution.3",
+    "69-lifecycle.1.r2"
+   ],
+   "justification": "3,060 heap fetches after UPDATE with relallvisible 163 of 163; after VACUUM back to 0.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-only:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-turn-matches-into-index-paths.3.s1"
+   ],
+   "justification": "Needed columns must be returnable.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-only:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "68-planning-versus-execution.1.r3"
+   ],
+   "justification": "Charged using stored all-visible fraction.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-only:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "68-planning-versus-execution.1.r3"
+   ],
+   "justification": "Executor checks live visibility map.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-only:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "68-planning-versus-execution.2.s2",
+    "69-lifecycle.1.r2"
+   ],
+   "justification": "Writes then heap fetches; VACUUM resets.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-capabilities.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "75-eligibility-and-comparison.4.r1",
+    "75-eligibility-and-comparison.4.r3",
+    "75-eligibility-and-comparison.4.r4",
+    "75-eligibility-and-comparison.4.r5",
+    "75-eligibility-and-comparison.4.r6",
+    "step-4-turn-matches-into-index-paths.4.s2"
+   ],
+   "justification": "B-tree ordered and parallel; GiST and SP-GiST distance ordering; GIN and BRIN bitmap only; amcanparallel is only B-tree.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-capabilities.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-combine-indexes-through-bitmaps.1.s2",
+    "step-5-combine-indexes-through-bitmaps.1.s6",
+    "step-5-combine-indexes-through-bitmaps.2.s2",
+    "56-exceptions-and-limitations.1.r6"
+   ],
+   "justification": "BitmapOr for OR arms, BitmapAnd kept only when estimated total falls; lossy pages rechecked.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-capabilities:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "75-eligibility-and-comparison.4.r1"
+   ],
+   "justification": "B-tree both scan kinds, parallel, order.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-capabilities:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "75-eligibility-and-comparison.4.r3",
+    "75-eligibility-and-comparison.4.r4"
+   ],
+   "justification": "Distance operator ordering.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-capabilities:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "75-eligibility-and-comparison.4.r5",
+    "75-eligibility-and-comparison.4.r6"
+   ],
+   "justification": "GIN and BRIN have only bitmap access.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-capabilities:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-combine-indexes-through-bitmaps.1.s6"
+   ],
+   "justification": "Candidate kept only if estimated total falls.",
+   "issues": []
+  },
+  {
+   "target": "narration:join-search.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-one-relation-per-set-of-tables.1.s1",
+    "step-3-enumerate-candidate-pairs-level-by-level.1.s1",
+    "step-4-check-legality.1.s3",
+    "step-4-check-legality.2.s2",
+    "step-4-check-legality.3.s1"
+   ],
+   "justification": "Level-by-level DP, one RelOptInfo per set of tables, SpecialJoinInfo and LATERAL legality, illegal pair gets no relation.",
+   "issues": []
+  },
+  {
+   "target": "narration:join-search.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "guc:join_collapse_limit",
+    "guc:from_collapse_limit",
+    "guc:geqo_threshold",
+    "coverage-matrix.2.r141",
+    "step-2-pick-the-search-strategy.2.s1",
+    "81-main-idea.2.s3"
+   ],
+   "justification": "Collapse limits 8, geqo on with threshold 12 per list; GEQO samples join orders instead of trying them all, and found a plan 1.9 percent dearer in the example.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-search:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-one-relation-per-set-of-tables.1.s1"
+   ],
+   "justification": "One RelOptInfo per set of tables.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-search:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-enumerate-candidate-pairs-level-by-level.1.s1"
+   ],
+   "justification": "standard_join_search builds levels.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-search:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-turn-the-join-tree-into-lists.2.s1"
+   ],
+   "justification": "Collapse limits merge lists.",
+   "issues": []
+  },
+  {
+   "target": "screen:join-search:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-pick-the-search-strategy.2.s1"
+   ],
+   "justification": "Count is per list, not per query.",
+   "issues": []
+  },
+  {
+   "target": "narration:fractional-cost.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "fractional-cost-for-a-cursor-e17.2",
+    "step-9-price-only-the-part-of-the-output-that-will-be-read.1.s2",
+    "step-9-price-only-the-part-of-the-output-that-will-be-read.1.s3",
+    "15-eligibility-and-comparison.2.s3"
+   ],
+   "justification": "Fractional cost S + f(T-S), T for f=0 or f>=1; Limit and cursors use the tuple fraction so a cheap-startup path can win.",
+   "issues": []
+  },
+  {
+   "target": "narration:fractional-cost.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "fractional-cost-for-a-cursor-e17.8.s1",
+    "fractional-cost-for-a-cursor-e17.9.r1",
+    "fractional-cost-for-a-cursor-e17.9.r2",
+    "fractional-cost-for-a-cursor-e17.10.s2"
+   ],
+   "justification": "f=0.1: merge join 589.19 versus hash join 1072.03.",
+   "issues": []
+  },
+  {
+   "target": "screen:fractional-cost:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "fractional-cost-for-a-cursor-e17.2"
+   ],
+   "justification": "Formula S + f*(T-S).",
+   "issues": []
+  },
+  {
+   "target": "screen:fractional-cost:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "fractional-cost-for-a-cursor-e17.2"
+   ],
+   "justification": "T for f=0 or f>=1.",
+   "issues": []
+  },
+  {
+   "target": "screen:fractional-cost:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "fractional-cost-for-a-cursor-e17.10.s3",
+    "fractional-cost-for-a-cursor-e17.3.s2"
+   ],
+   "justification": "A cursor uses cursor_tuple_fraction; cheap-start path wins when the caller stops early.",
+   "issues": []
+  },
+  {
+   "target": "screen:fractional-cost:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "fractional-cost-for-a-cursor-e17.8.s1"
+   ],
+   "justification": "cursor_tuple_fraction = 0.1.",
+   "issues": []
+  },
+  {
+   "target": "narration:scan-menu.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "61-main-idea.2.s2",
+    "61-main-idea.2.s3",
+    "step-2-offer-the-paths-a-plain-table-allows.1.s1",
+    "step-2-offer-the-paths-a-plain-table-allows.1.s3",
+    "step-6-subqueries-are-planned-first-then-wrapped.1.s3",
+    "step-5-foreign-tables-ask-their-foreign-data-wrapper.1.s3"
+   ],
+   "justification": "Plain table seq always, index and TID paths on request, kept subquery planned then wrapped in SubqueryScan, FDW supplies paths via GetForeignPaths.",
+   "issues": []
+  },
+  {
+   "target": "narration:scan-menu.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-functions-table-functions-and-values-get-one-path-each.1.s1",
+    "step-7-functions-table-functions-and-values-get-one-path-each.2.s3"
+   ],
+   "justification": "Function sized by support function or prorows; VALUES sized exactly by row count.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-menu:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "61-main-idea.2.s2"
+   ],
+   "justification": "Plain table paths.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-menu:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-subqueries-are-planned-first-then-wrapped.1.s3"
+   ],
+   "justification": "Subquery planned, then SubqueryScan wrapper.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-menu:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "61-main-idea.2.s4",
+    "step-7-functions-table-functions-and-values-get-one-path-each.2.s3"
+   ],
+   "justification": "Functions and VALUES get one basic path.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-menu:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-foreign-tables-ask-their-foreign-data-wrapper.1.s1"
+   ],
+   "justification": "Foreign table calls the FDW.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-matches.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-collect-the-usable-indexes.1.s2",
+    "step-2-prove-partial-index-predicates.1.s2",
+    "step-3-match-each-clause-to-an-index-column.3.1.1.s1",
+    "step-3-match-each-clause-to-an-index-column.3.2.1.s1",
+    "step-3-match-each-clause-to-an-index-column.3.3.1.s1",
+    "step-3-match-each-clause-to-an-index-column.3.4.1.s1"
+   ],
+   "justification": "Invalid index skipped; predicate implication proof; key, other side no Var of this table and nothing volatile, collation, operator family.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-matches.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-match-each-clause-to-an-index-column.4.s2",
+    "step-3-match-each-clause-to-an-index-column.4.s3",
+    "step-3-match-each-clause-to-an-index-column.3.1.1.s2"
+   ],
+   "justification": "id + 0 = 42 falls back to Seq Scan; cross-type operator in the family still matches.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-matches:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-collect-the-usable-indexes.1.s2"
+   ],
+   "justification": "Invalid indexes are skipped.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-matches:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.1.s2"
+   ],
+   "justification": "predicate_implied_by proof.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-matches:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-match-each-clause-to-an-index-column.2.s1"
+   ],
+   "justification": "Key, family and collation must match.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-matches:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-match-each-clause-to-an-index-column.3.1.1.s2"
+   ],
+   "justification": "Expression side must be equal() to the stored expression.",
+   "issues": []
+  },
+  {
+   "target": "narration:opening.n1",
+   "factual": false,
+   "verdict": "not_factual",
+   "evidence": [],
+   "justification": "Framing only; names no behavior or value.",
+   "issues": []
+  },
+  {
+   "target": "narration:question.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "question.2"
+   ],
+   "justification": "The request asks how the planner works including core planner and extension interfaces, following a query and then each subsystem.",
+   "issues": []
+  },
+  {
+   "target": "screen:question:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "question.2",
+    "11-main-idea.1.s1"
+   ],
+   "justification": "Matches the page's question about turning SQL into a plan via the stages.",
+   "issues": []
+  },
+  {
+   "target": "narration:answer.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "main-idea.1.s1",
+    "main-idea.2.s2",
+    "main-idea.2.s3",
+    "main-idea.2.s4"
+   ],
+   "justification": "Matches main idea: analyzed/rewritten query to one plan, working model and equivalent rewrite, bottom-up candidate paths each with estimated rows and cost.",
+   "issues": []
+  },
+  {
+   "target": "narration:answer.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "main-idea.1.s2",
+    "main-idea.3.s1",
+    "main-idea.3.s2",
+    "main-idea.3.s3"
+   ],
+   "justification": "Matches add_path criteria, cheapest final path to plan tree, planner_hook or standard_planner, PlannedStmt.",
+   "issues": []
+  },
+  {
+   "target": "screen:answer:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "main-idea.3.s2"
+   ],
+   "justification": "Surviving alternatives after add_path comparison.",
+   "issues": []
+  },
+  {
+   "target": "edge:answer:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "main-idea.2.s3"
+   ],
+   "justification": "The planner builds candidate paths.",
+   "issues": []
+  },
+  {
+   "target": "edge:answer:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "main-idea.3.s3"
+   ],
+   "justification": "standard_planner turns cheapest path into plan tree via create_plan.",
+   "issues": []
+  },
+  {
+   "target": "edge:answer:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "main-idea.1.s2"
+   ],
+   "justification": "planner() returns a PlannedStmt.",
+   "issues": []
+  },
+  {
+   "target": "narration:pipeline.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "11-main-idea.1.s2",
+    "11-main-idea.1.s3",
+    "11-main-idea.1.s4",
+    "11-main-idea.1.s5",
+    "step-1-raw-parsing.1.s3",
+    "step-2-snapshot-and-parse-analysis.1.s3",
+    "step-3-rewriting.1.s3"
+   ],
+   "justification": "Stages and outputs match; raw parsing reads no catalogs, rewriter expands views and rules into one or more Query trees.",
+   "issues": [
+    {
+     "code": "other",
+     "severity": "minor",
+     "message": "The source says analysis pushes a snapshot only if it needs one (the narration drops 'if'), and 'uses catalog information' and 'typed' are not stated in the cited text."
+    }
+   ]
+  },
+  {
+   "target": "narration:pipeline.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-utilities-that-contain-a-query.1.s1",
+    "step-6-utilities-that-contain-a-query.1.s3",
+    "step-2-snapshot-and-parse-analysis.2.s4",
+    "11-main-idea.3.s3"
+   ],
+   "justification": "Utilities are wrapped in CMD_UTILITY Query and not planned in step 4; EXPLAIN and CREATE TABLE AS plan their inner query when the utility runs.",
+   "issues": [
+    {
+     "code": "other",
+     "severity": "minor",
+     "message": "'commonly' hedges the source, which says every other statement is wrapped unchanged; 'require a distinction' is filler."
+    }
+   ]
+  },
+  {
+   "target": "screen:pipeline:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "11-main-idea.1.s2",
+    "step-1-raw-parsing.1.s2"
+   ],
+   "justification": "Raw parsing stage.",
+   "issues": []
+  },
+  {
+   "target": "screen:pipeline:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "11-main-idea.1.s3",
+    "11-main-idea.1.s4"
+   ],
+   "justification": "Parse analysis and rewriting stages.",
+   "issues": []
+  },
+  {
+   "target": "screen:pipeline:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "11-main-idea.1.s5"
+   ],
+   "justification": "Planner stage.",
+   "issues": []
+  },
+  {
+   "target": "screen:pipeline:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "11-main-idea.1.s5"
+   ],
+   "justification": "Portal and executor run the PlannedStmt.",
+   "issues": []
+  },
+  {
+   "target": "narration:path-model.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "21-main-idea.1.s3",
+    "21-main-idea.1.s4",
+    "22-values-and-structures.1.r5",
+    "22-values-and-structures.1.r7",
+    "21-main-idea.2.s5"
+   ],
+   "justification": "Path is one candidate way to produce a relation's rows; RelOptInfo per relation, join or later step; Plan created from survivors.",
+   "issues": []
+  },
+  {
+   "target": "narration:path-model.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-paths-compete-inside-each-relation.1.s2",
+    "step-5-paths-compete-inside-each-relation.1.s4"
+   ],
+   "justification": "add_path keeps a path unless another is at least as good on cost, sort order, rows, parameterization and parallel safety; set_cheapest records cheapest startup and total.",
+   "issues": []
+  },
+  {
+   "target": "screen:path-model:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "21-main-idea.1.s3",
+    "22-values-and-structures.1.r5"
+   ],
+   "justification": "RelOptInfo is per relation, join or step.",
+   "issues": []
+  },
+  {
+   "target": "screen:path-model:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "22-values-and-structures.1.r7"
+   ],
+   "justification": "Path definition.",
+   "issues": []
+  },
+  {
+   "target": "screen:path-model:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "21-main-idea.1.s4",
+    "21-main-idea.2.s5"
+   ],
+   "justification": "Plan nodes are the output tree.",
+   "issues": []
+  },
+  {
+   "target": "screen:path-model:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-paths-compete-inside-each-relation.1.s2"
+   ],
+   "justification": "Paths survive when not dominated on sort order, parameterization etc.",
+   "issues": []
+  },
+  {
+   "target": "narration:fixture.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "the-running-schema-and-queries.2.r1",
+    "the-running-schema-and-queries.2.r2",
+    "the-running-schema-and-queries.2.r3",
+    "the-running-schema-and-queries.5"
+   ],
+   "justification": "Row counts, 30 percent of orders to 20 large customers, and Q1 definition match.",
+   "issues": []
+  },
+  {
+   "target": "narration:fixture.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "how-to-read-this-tutorial.3.r1",
+    "how-to-read-this-tutorial.3.r2",
+    "how-to-read-this-tutorial.3.r3",
+    "the-running-schema-and-queries.1.s3",
+    "the-running-schema-and-queries.1.s5"
+   ],
+   "justification": "Three kinds of numbers and the sampling statements match the page.",
+   "issues": []
+  },
+  {
+   "target": "narration:q1-plan.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "reading-q1s-plan-e11-e12.2",
+    "reading-q1s-plan-e11-e12.3.s5"
+   ],
+   "justification": "Plan shape and estimates 3019, 200, 302 versus actual 3019, 200, 290 match the plan output.",
+   "issues": []
+  },
+  {
+   "target": "narration:q1-plan.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "reading-q1s-plan-e11-e12.3.s3",
+    "reading-q1s-plan-e11-e12.3.s4",
+    "reading-q1s-plan-e11-e12.3.s6"
+   ],
+   "justification": "cost pair is startup and total; actual figures come from running; Sort Method and Memory decided at run time.",
+   "issues": []
+  },
+  {
+   "target": "screen:q1-plan:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "reading-q1s-plan-e11-e12.2"
+   ],
+   "justification": "Seq Scan orders rows=3019, actual 3019.",
+   "issues": []
+  },
+  {
+   "target": "screen:q1-plan:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "reading-q1s-plan-e11-e12.2"
+   ],
+   "justification": "Seq Scan customers rows=200, actual 200.",
+   "issues": []
+  },
+  {
+   "target": "screen:q1-plan:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "reading-q1s-plan-e11-e12.2"
+   ],
+   "justification": "Hash Join rows=302, actual 290.",
+   "issues": []
+  },
+  {
+   "target": "screen:q1-plan:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "reading-q1s-plan-e11-e12.2"
+   ],
+   "justification": "Plan nodes in order Limit, Sort, Hash Join.",
+   "issues": []
+  },
+  {
+   "target": "narration:rewrites.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-preprocess-every-expression.3.s1",
+    "step-5-preprocess-every-expression.3.s2",
+    "step-5-preprocess-every-expression.3.s5",
+    "31-main-idea.2.s3"
+   ],
+   "justification": "Immutable constant folding; stable folded only in estimation mode and now() stays in the plan; volatility protects side effects.",
+   "issues": []
+  },
+  {
+   "target": "narration:rewrites.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-flatten-simple-subqueries-and-views.2.s2",
+    "step-4-flatten-simple-subqueries-and-views.2.s3",
+    "step-4-flatten-simple-subqueries-and-views.5.s1",
+    "step-4-flatten-simple-subqueries-and-views.5.s2"
+   ],
+   "justification": "Blockers listed match; OFFSET 0 fence leaves a Subquery Scan with filter above.",
+   "issues": []
+  },
+  {
+   "target": "screen:rewrites:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-preprocess-every-expression.3.s1"
+   ],
+   "justification": "Immutable constant expressions fold.",
+   "issues": []
+  },
+  {
+   "target": "screen:rewrites:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-flatten-simple-subqueries-and-views.1.s1"
+   ],
+   "justification": "Simple subqueries are pulled up.",
+   "issues": []
+  },
+  {
+   "target": "screen:rewrites:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-flatten-simple-subqueries-and-views.2.s2",
+    "step-4-flatten-simple-subqueries-and-views.4.1.1.s1"
+   ],
+   "justification": "LIMIT/OFFSET and security barrier block pull-up; LIMIT/OFFSET refuses qual pushdown.",
+   "issues": []
+  },
+  {
+   "target": "screen:rewrites:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-flatten-simple-subqueries-and-views.5.s1",
+    "step-4-flatten-simple-subqueries-and-views.5.s2"
+   ],
+   "justification": "OFFSET 0 acts as a fence.",
+   "issues": []
+  },
+  {
+   "target": "narration:outer-security.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-reduce-outer-joins.1.s1",
+    "step-7-reduce-outer-joins.1.s2",
+    "step-7-reduce-outer-joins.2.s2",
+    "step-7-reduce-outer-joins.2.s3"
+   ],
+   "justification": "Strict WHERE qual rejecting nullable-side NULLs allows inner join; same condition in ON keeps outer join.",
+   "issues": []
+  },
+  {
+   "target": "narration:outer-security.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-security-quals-keep-their-place.2.s1",
+    "step-9-security-quals-keep-their-place.2.s2",
+    "step-10-derive-remove-and-extract-after-distribution.2.1.1.s1"
+   ],
+   "justification": "Quals ordered by security level then cost; cheap leakproof qual treated as level 0; equivalence classes yield restrictions.",
+   "issues": []
+  },
+  {
+   "target": "screen:outer-security:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-reduce-outer-joins.1.s1"
+   ],
+   "justification": "Strict qual above outer join.",
+   "issues": []
+  },
+  {
+   "target": "screen:outer-security:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-reduce-outer-joins.2.s3"
+   ],
+   "justification": "ON condition keeps outer rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:outer-security:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-security-quals-keep-their-place.2.s1"
+   ],
+   "justification": "order_qual_clauses by security level.",
+   "issues": []
+  },
+  {
+   "target": "screen:outer-security:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-10-derive-remove-and-extract-after-distribution.2.1.1.s1"
+   ],
+   "justification": "Equivalence classes with a constant produce restrictions.",
+   "issues": []
+  },
+  {
+   "target": "narration:cost-units.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "glossary:cost",
+    "51-main-idea.1.s2",
+    "51-main-idea.3.s2",
+    "51-main-idea.2.s2"
+   ],
+   "justification": "Cost is a planner estimate in arbitrary units, not time; startup before first row, total for all rows; pages, rows and temp-file prices.",
+   "issues": []
+  },
+  {
+   "target": "narration:cost-units.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "52-values-and-structures.1.r1",
+    "52-values-and-structures.1.r4"
+   ],
+   "justification": "seq_page_cost 1.0, random_page_cost 4.0; effective_cache_size reserves no memory and is used only for estimates.",
+   "issues": []
+  },
+  {
+   "target": "screen:cost-units:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "51-main-idea.1.s2"
+   ],
+   "justification": "startup_cost is spent before the first row appears.",
+   "issues": []
+  },
+  {
+   "target": "screen:cost-units:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "51-main-idea.1.s2"
+   ],
+   "justification": "total_cost covers every row.",
+   "issues": []
+  },
+  {
+   "target": "screen:cost-units:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "52-values-and-structures.1.r1"
+   ],
+   "justification": "seq_page_cost 1.0.",
+   "issues": []
+  },
+  {
+   "target": "screen:cost-units:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "52-values-and-structures.1.r1"
+   ],
+   "justification": "random_page_cost 4.0.",
+   "issues": []
+  },
+  {
+   "target": "screen:cost-units:5",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "52-values-and-structures.1.r4"
+   ],
+   "justification": "effective_cache_size is the pages the planner assumes cached.",
+   "issues": []
+  },
+  {
+   "target": "narration:scan-cost.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.5.r1",
+    "step-2-price-a-scan.1.s1"
+   ],
+   "justification": "226 + 30000 x 0.01 = 526.00.",
+   "issues": []
+  },
+  {
+   "target": "narration:scan-cost.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.5.r2",
+    "step-4-price-the-conditions-and-expressions.2.s2"
+   ],
+   "justification": "One texteq at 0.0025 per row gives 601.00; short-circuit is deliberately ignored.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-cost:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.5.r1"
+   ],
+   "justification": "226 pages, 30000 rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-cost:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.5.r1"
+   ],
+   "justification": "526.00.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-cost:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.5.r2"
+   ],
+   "justification": "601.00.",
+   "issues": []
+  },
+  {
+   "target": "screen:scan-cost:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-price-the-conditions-and-expressions.2.s2"
+   ],
+   "justification": "Every condition charged on every row.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-cost.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.21.s1",
+    "57-formulas-and-worked-examples.21.s3",
+    "57-formulas-and-worked-examples.22",
+    "57-formulas-and-worked-examples.25.s4"
+   ],
+   "justification": "Bitmap 513.47 wins at default; forced settings show the index scan eligible at 1140.74; it was only more expensive.",
+   "issues": []
+  },
+  {
+   "target": "narration:index-cost.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.22",
+    "57-formulas-and-worked-examples.25.s2"
+   ],
+   "justification": "random_page_cost 4 to 1.1 brings the index scan to 453.57.",
+   "issues": [
+    {
+     "code": "framing_claim",
+     "severity": "minor",
+     "message": "'not recommendations for a server's settings' is an added disclaimer not stated in the source."
+    }
+   ]
+  },
+  {
+   "target": "screen:index-cost:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.22"
+   ],
+   "justification": "Bitmap Heap Scan cost 513.47.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-cost:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.22"
+   ],
+   "justification": "Index Scan 1140.74 under forced settings.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-cost:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.22",
+    "57-formulas-and-worked-examples.25.s2"
+   ],
+   "justification": "Index Scan 453.57 at random_page_cost 1.1.",
+   "issues": []
+  },
+  {
+   "target": "screen:index-cost:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.25.s4"
+   ],
+   "justification": "Index scan was never ineligible, only more expensive.",
+   "issues": []
+  },
+  {
+   "target": "narration:sort-memory.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-price-sorts-aggregation-and-materialization.1.s1",
+    "step-5-price-sorts-aggregation-and-materialization.2.s2",
+    "step-5-price-sorts-aggregation-and-materialization.2.s3",
+    "coverage-matrix.2.r91"
+   ],
+   "justification": "Rows and width plus work_mem limit drive costing; defaults 4 MB and 2.0; bounded heap sort for LIMIT differs from full sort.",
+   "issues": []
+  },
+  {
+   "target": "narration:sort-memory.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.9.s2",
+    "main-idea.5.2.1.s2",
+    "main-idea.5.2.1.s3",
+    "reading-q1s-plan-e11-e12.3.s6"
+   ],
+   "justification": "Executor adapts only inside the plan's decisions; batches split at run time; Sort Method decided while running.",
+   "issues": []
+  },
+  {
+   "target": "screen:sort-memory:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "coverage-matrix.2.r91"
+   ],
+   "justification": "work_mem boot value 4 MB.",
+   "issues": []
+  },
+  {
+   "target": "screen:sort-memory:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "coverage-matrix.2.r91"
+   ],
+   "justification": "hash_mem_multiplier boot value 2.0.",
+   "issues": []
+  },
+  {
+   "target": "screen:sort-memory:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-price-sorts-aggregation-and-materialization.2.s2",
+    "step-5-price-sorts-aggregation-and-materialization.3.s2"
+   ],
+   "justification": "Spill costs added for sort and hash.",
+   "issues": []
+  },
+  {
+   "target": "screen:sort-memory:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "57-formulas-and-worked-examples.9.s2"
+   ],
+   "justification": "Measured executor sort methods.",
+   "issues": []
+  },
+  {
+   "target": "narration:table-size.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-the-planner-sizes-the-table-from-the-file.2.s1",
+    "step-2-the-planner-sizes-the-table-from-the-file.2.s2",
+    "step-2-the-planner-sizes-the-table-from-the-file.2.s4",
+    "step-2-the-planner-sizes-the-table-from-the-file.4.s2"
+   ],
+   "justification": "When reltuples and relpages hold a measurement, density times current pages gives tuples; rows added since ANALYZE are counted through file growth at the old density.",
+   "issues": [
+    {
+     "code": "other",
+     "severity": "minor",
+     "message": "'does not count every row while planning' is inferred, not stated."
+    }
+   ]
+  },
+  {
+   "target": "narration:table-size.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-analyze-summarizes-a-sample.3.s2",
+    "step-1-analyze-summarizes-a-sample.3.s3",
+    "step-1-analyze-summarizes-a-sample.4.s1",
+    "step-1-analyze-summarizes-a-sample.4.s2",
+    "step-1-analyze-summarizes-a-sample.2.s1"
+   ],
+   "justification": "ANALYZE derives MCV list, distinct count, histogram, correlation from a random sample; null fraction is stored per the exceptions table.",
+   "issues": []
+  },
+  {
+   "target": "screen:table-size:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-the-planner-sizes-the-table-from-the-file.2.s4"
+   ],
+   "justification": "Tuples are density times current pages.",
+   "issues": []
+  },
+  {
+   "target": "screen:table-size:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-analyze-summarizes-a-sample.5.s1"
+   ],
+   "justification": "ANALYZE outputs pg_statistic rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:table-size:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-the-planner-sizes-the-table-from-the-file.4.s2"
+   ],
+   "justification": "Rows added since ANALYZE are counted because the file grew.",
+   "issues": []
+  },
+  {
+   "target": "screen:table-size:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-estimate-the-width.1.s2"
+   ],
+   "justification": "Width feeds the byte estimates of sorts, hashes and materializations (cost effect is indirect, via fit in work_mem).",
+   "issues": []
+  },
+  {
+   "target": "narration:selectivity.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "glossary:selectivity",
+    "step-4-estimate-each-condition.2.s2",
+    "step-4-estimate-each-condition.3.s1",
+    "step-4-estimate-each-condition.3.s2",
+    "step-4-estimate-each-condition.2.s4"
+   ],
+   "justification": "Matches eqsel MCV frequency, scalarineqsel MCV plus histogram interpolation, and defaults without statistics.",
+   "issues": []
+  },
+  {
+   "target": "narration:selectivity.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.6.r1",
+    "step-5-combine-the-conditions-and-clamp.1.s2",
+    "step-5-combine-the-conditions-and-clamp.2.s1"
+   ],
+   "justification": "30000 x 0.10063333 rounds to 3019; the remaining conditions are multiplied assuming independence.",
+   "issues": []
+  },
+  {
+   "target": "screen:selectivity:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "glossary:selectivity"
+   ],
+   "justification": "Glossary definition.",
+   "issues": []
+  },
+  {
+   "target": "screen:selectivity:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-estimate-each-condition.2.s2"
+   ],
+   "justification": "MCV match returns stored frequency.",
+   "issues": []
+  },
+  {
+   "target": "screen:selectivity:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-estimate-each-condition.3.s1"
+   ],
+   "justification": "Histogram fraction plus MCVs.",
+   "issues": []
+  },
+  {
+   "target": "screen:selectivity:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-combine-the-conditions-and-clamp.2.s1"
+   ],
+   "justification": "The rest are multiplied.",
+   "issues": []
+  },
+  {
+   "target": "narration:extended-stats.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.20.s2",
+    "47-formulas-and-worked-examples.23.s1",
+    "167-formulas-and-worked-examples.2.s4",
+    "167-formulas-and-worked-examples.2.s5"
+   ],
+   "justification": "2000 x 0.1 x 0.049 = 9.8 printed as 10; truth 98 since every PT customer is western.",
+   "issues": []
+  },
+  {
+   "target": "narration:extended-stats.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.21.s1",
+    "47-formulas-and-worked-examples.22",
+    "49-lifecycle.1.r7",
+    "step-3-find-statistics-for-each-expression.1.s3"
+   ],
+   "justification": "CREATE STATISTICS then ANALYZE gives 98; the object is empty until the next ANALYZE; extended statistics cover expressions too.",
+   "issues": []
+  },
+  {
+   "target": "screen:extended-stats:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.20.s2"
+   ],
+   "justification": "West is 10 percent of customers.",
+   "issues": []
+  },
+  {
+   "target": "screen:extended-stats:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.20.s2"
+   ],
+   "justification": "PT is 4.9 percent.",
+   "issues": []
+  },
+  {
+   "target": "screen:extended-stats:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.23.s1"
+   ],
+   "justification": "Independence gives 9.8 rounded to 10.",
+   "issues": []
+  },
+  {
+   "target": "screen:extended-stats:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.22"
+   ],
+   "justification": "Actual rows=98.",
+   "issues": []
+  },
+  {
+   "target": "screen:extended-stats:5",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.22"
+   ],
+   "justification": "After CREATE STATISTICS and ANALYZE the estimate is rows=98.",
+   "issues": []
+  },
+  {
+   "target": "narration:stale-stats.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.13.r4",
+    "47-formulas-and-worked-examples.13.r5",
+    "47-formulas-and-worked-examples.15.s2",
+    "47-formulas-and-worked-examples.19"
+   ],
+   "justification": "After 10,000 more rows, total scales with the file, histogram ends at 10000, x > 10000 estimated 2 and actually 10000.",
+   "issues": []
+  },
+  {
+   "target": "narration:stale-stats.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-estimate-each-condition.4.s1",
+    "coverage-matrix.2.r56",
+    "47-formulas-and-worked-examples.13.r6",
+    "exercise-2-a-table-that-grew-after-its-last-analyze.3.s4"
+   ],
+   "justification": "Endpoint probe needs a plain non-partial B-tree leading with the column; estimate 198 versus actual 10000; ANALYZE fixes it.",
+   "issues": []
+  },
+  {
+   "target": "screen:stale-stats:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-the-planner-sizes-the-table-from-the-file.4.s2"
+   ],
+   "justification": "File growth is counted.",
+   "issues": []
+  },
+  {
+   "target": "screen:stale-stats:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.15.s2"
+   ],
+   "justification": "Histogram still ends at 10000.",
+   "issues": []
+  },
+  {
+   "target": "screen:stale-stats:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-estimate-each-condition.4.s1"
+   ],
+   "justification": "Endpoint probe by plain B-tree.",
+   "issues": []
+  },
+  {
+   "target": "screen:stale-stats:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "47-formulas-and-worked-examples.19"
+   ],
+   "justification": "rows=2 estimated, actual 10000.",
+   "issues": []
+  },
+  {
+   "target": "narration:parallel-jit.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-128-run-with-the-workers-that-can-be-obtained.1.s1",
+    "step-128-run-with-the-workers-that-can-be-obtained.1.s2",
+    "step-128-run-with-the-workers-that-can-be-obtained.1.s3",
+    "step-128-run-with-the-workers-that-can-be-obtained.3.s1",
+    "open-questions.26.3.1.s1"
+   ],
+   "justification": "Workers launched at execution may be fewer or none; shortfall not measured; idle server launched all.",
+   "issues": [
+    {
+     "code": "changed_condition",
+     "severity": "minor",
+     "message": "Source says the leader runs the partial plan itself when no workers are obtained or when the leader participates; 'with fewer workers' alone drops the leader-participation condition."
+    }
+   ]
+  },
+  {
+   "target": "narration:parallel-jit.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-129-jit-decided-while-planning-and-done-while-running.1.s2",
+    "step-129-jit-decided-while-planning-and-done-while-running.4.s2",
+    "step-129-jit-decided-while-planning-and-done-while-running.4.s4",
+    "open-questions.26.2.1.s1",
+    "open-questions.26.2.1.s2"
+   ],
+   "justification": "PGJIT_PERFORM when jit on, jit_above_cost nonnegative and cost exceeds it; runtime needs live jit and provider; no LLVM so only flag decision measured.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-jit:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-128-run-with-the-workers-that-can-be-obtained.1.s2",
+    "step-128-run-with-the-workers-that-can-be-obtained.3.s1"
+   ],
+   "justification": "Planned versus launched workers.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-jit:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-128-run-with-the-workers-that-can-be-obtained.1.s3"
+   ],
+   "justification": "Leader runs the partial plan when no workers or when participating.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-jit:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-129-jit-decided-while-planning-and-done-while-running.1.s2",
+    "step-129-jit-decided-while-planning-and-done-while-running.4.s2"
+   ],
+   "justification": "Flags from planning, live jit setting and provider at runtime.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-jit:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.26.2.1.s1"
+   ],
+   "justification": "No LLVM so compilation not demonstrated.",
+   "issues": []
+  },
+  {
+   "target": "narration:writes.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "131-main-idea.1.s2",
+    "131-main-idea.1.s3",
+    "131-main-idea.1.s4",
+    "the-running-schema-and-queries.5",
+    "q4-the-row-identity-and-the-row-mark-e133.3.s3",
+    "q4-the-row-identity-and-the-row-mark-e133.3.s4"
+   ],
+   "justification": "Writes planned as a SELECT then ModifyTable; Q4 joins western customers to pending orders with amount * 1.1; ctid row identity and EvalPlanQual recheck; LockRows for FOR UPDATE.",
+   "issues": []
+  },
+  {
+   "target": "narration:writes.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-add-lockrows-limit-and-modifytable-on-the-final-relation.3.s1",
+    "131-main-idea.2.s2",
+    "131-main-idea.3.s4"
+   ],
+   "justification": "ModifyTable keeps input cost and reports rows only with RETURNING; no write or FOR UPDATE plan is parallel though CREATE TABLE AS can be.",
+   "issues": []
+  },
+  {
+   "target": "screen:writes:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "131-main-idea.1.s2"
+   ],
+   "justification": "Planned like a SELECT.",
+   "issues": []
+  },
+  {
+   "target": "screen:writes:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "131-main-idea.1.s3"
+   ],
+   "justification": "ModifyTable applies the write.",
+   "issues": []
+  },
+  {
+   "target": "screen:writes:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-complete-the-target-list.2.3.1.s1",
+    "q4-the-row-identity-and-the-row-mark-e133.3.s4"
+   ],
+   "justification": "ctid junk column and row-mark ctid for EvalPlanQual.",
+   "issues": []
+  },
+  {
+   "target": "screen:writes:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "131-main-idea.2.s2",
+    "step-6-add-lockrows-limit-and-modifytable-on-the-final-relation.3.s1"
+   ],
+   "justification": "No cost added for the write itself.",
+   "issues": []
+  },
+  {
+   "target": "narration:write-runtime.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-merge-becomes-a-join.2.s1",
+    "step-1-merge-becomes-a-join.2.s2",
+    "138-planning-versus-execution.1.r1",
+    "138-planning-versus-execution.1.r2",
+    "step-4-expand-an-inherited-or-partitioned-target.1.s2"
+   ],
+   "justification": "WHEN clauses fix MERGE join type; executor applies per-row action; INSERT opened without inheritance and routed at execution.",
+   "issues": []
+  },
+  {
+   "target": "narration:write-runtime.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "138-planning-versus-execution.2.s2",
+    "open-questions.28.2.1",
+    "166-exceptions-and-limitations.1.r1",
+    "the-running-schema-and-queries.6"
+   ],
+   "justification": "READ COMMITTED EvalPlanQual recheck described from source, not run; EXPLAIN ANALYZE really runs a write so writes are wrapped in BEGIN and ROLLBACK.",
+   "issues": []
+  },
+  {
+   "target": "screen:write-runtime:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-merge-becomes-a-join.2.s1"
+   ],
+   "justification": "WHEN clauses fix the join type.",
+   "issues": []
+  },
+  {
+   "target": "screen:write-runtime:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "138-planning-versus-execution.1.r1"
+   ],
+   "justification": "Executor applies per-row MERGE action.",
+   "issues": []
+  },
+  {
+   "target": "screen:write-runtime:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "138-planning-versus-execution.1.r2"
+   ],
+   "justification": "INSERT partition routing is at execution.",
+   "issues": []
+  },
+  {
+   "target": "screen:write-runtime:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "166-exceptions-and-limitations.1.r1"
+   ],
+   "justification": "EXPLAIN ANALYZE of a write really runs.",
+   "issues": []
+  },
+  {
+   "target": "narration:plan-construction.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-build-plan-nodes-from-paths.2.s1",
+    "step-7-from-path-to-plan.1",
+    "step-7-from-path-to-plan.1.s4"
+   ],
+   "justification": "create_plan builds matching Plan nodes nearly one to one; hash join gets a Hash node; merge join sorts unsorted inputs; parents tell children the target list.",
+   "issues": []
+  },
+  {
+   "target": "narration:plan-construction.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-build-plan-nodes-from-paths.3.s3",
+    "step-2-finalize-parameters.1.s3",
+    "step-3-fix-references-and-record-dependencies.1.s2",
+    "step-3-fix-references-and-record-dependencies.2.4.1.s1",
+    "step-4-assemble-the-plannedstmt.1.s3"
+   ],
+   "justification": "InitPlans attached, SS_finalize_plan computes extParam and allParam, set_plan_references, relationOids and invalItems, PlannedStmt with jitFlags.",
+   "issues": []
+  },
+  {
+   "target": "screen:plan-construction:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-1-build-plan-nodes-from-paths.1.s2"
+   ],
+   "justification": "create_plan builds Plan nodes.",
+   "issues": []
+  },
+  {
+   "target": "screen:plan-construction:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-finalize-parameters.1.s2"
+   ],
+   "justification": "SS_finalize_plan finalizes parameters.",
+   "issues": []
+  },
+  {
+   "target": "screen:plan-construction:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-fix-references-and-record-dependencies.1.s2"
+   ],
+   "justification": "set_plan_references fixes references.",
+   "issues": []
+  },
+  {
+   "target": "screen:plan-construction:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-fix-references-and-record-dependencies.2.4.1.s1",
+    "step-4-assemble-the-plannedstmt.1.s2"
+   ],
+   "justification": "Dependencies recorded and PlannedStmt assembled.",
+   "issues": []
+  },
+  {
+   "target": "narration:cache-choice.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-create-a-cached-plan-source.1.s2",
+    "step-5-create-a-cached-plan-source.1.s5",
+    "145-eligibility-and-comparison.1.s1",
+    "145-eligibility-and-comparison.1.s3"
+   ],
+   "justification": "Analyzed and rewritten queries saved, no plan yet; custom with parameters, first five custom.",
+   "issues": []
+  },
+  {
+   "target": "narration:cache-choice.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "the-choice-formula.2",
+    "145-eligibility-and-comparison.2.s1",
+    "145-eligibility-and-comparison.2.s2",
+    "145-eligibility-and-comparison.2.s3",
+    "145-eligibility-and-comparison.1.s1",
+    "e142-a-skewed-parameter.6.s6"
+   ],
+   "justification": "Generic wins from the sixth execution when below average custom cost with planning charge; estimates only; forcing values obeyed first; no parameters means generic.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-choice:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "145-eligibility-and-comparison.1.s1",
+    "step-6-revalidate-choose-build.3.s1"
+   ],
+   "justification": "Custom plan built with actual values.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-choice:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-prove-partial-index-predicates.4.s10"
+   ],
+   "justification": "Generic uses unknown parameters.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-choice:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "145-eligibility-and-comparison.1.s3"
+   ],
+   "justification": "First five executions are custom.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-choice:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "the-choice-formula.2"
+   ],
+   "justification": "Generic cost compared with custom average.",
+   "issues": []
+  },
+  {
+   "target": "narration:cache-skew.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "e142-a-skewed-parameter.3",
+    "e142-a-skewed-parameter.6.s1",
+    "e142-a-skewed-parameter.6.s3"
+   ],
+   "justification": "458, 10 and generic 15, all Index Only Scan using orders_customer_id_idx.",
+   "issues": []
+  },
+  {
+   "target": "narration:cache-skew.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "e142-a-skewed-parameter.5.r5",
+    "e142-a-skewed-parameter.6.s3",
+    "step-7-diagnose-a-generic-plan.1.s2"
+   ],
+   "justification": "Generic chosen on 4.60 < 16.668 even though it cannot see skew.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-skew:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "e142-a-skewed-parameter.3"
+   ],
+   "justification": "rows=458 for customer 7.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-skew:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "e142-a-skewed-parameter.3"
+   ],
+   "justification": "rows=10 for customer 500.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-skew:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "e142-a-skewed-parameter.3"
+   ],
+   "justification": "rows=15 for generic.",
+   "issues": []
+  },
+  {
+   "target": "screen:cache-skew:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "e142-a-skewed-parameter.6.s3"
+   ],
+   "justification": "Both plans use the same index.",
+   "issues": []
+  },
+  {
+   "target": "narration:invalidation.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-invalidation.2.r1",
+    "step-7-invalidation.5.s3",
+    "final-causal-summary.3.r6",
+    "step-7-invalidation.1.s2"
+   ],
+   "justification": "relcache callbacks for relation OIDs; pg_index rows define relcache entries; search_path, role and row_security checked; planner setting changes do not replace a cached plan.",
+   "issues": []
+  },
+  {
+   "target": "narration:invalidation.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-invalidation.4.s1",
+    "step-7-invalidation.4.s2",
+    "step-7-invalidation.4.s3",
+    "step-7-invalidation.5.s3",
+    "e146-analyze-and-a-cached-generic-plan.5.s3",
+    "e146-analyze-and-a-cached-generic-plan.5.s4"
+   ],
+   "justification": "ANALYZE reaches the plan cache only via a pg_class row change; pg_statistic changes send no relcache message.",
+   "issues": []
+  },
+  {
+   "target": "screen:invalidation:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-invalidation.2.r1"
+   ],
+   "justification": "Relcache callback invalidates dependent statements.",
+   "issues": []
+  },
+  {
+   "target": "screen:invalidation:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.3.r6"
+   ],
+   "justification": "Revalidation checks search_path.",
+   "issues": []
+  },
+  {
+   "target": "screen:invalidation:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-invalidation.5.s3"
+   ],
+   "justification": "No callback for pg_statistic.",
+   "issues": []
+  },
+  {
+   "target": "screen:invalidation:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-invalidation.4.s5"
+   ],
+   "justification": "In-place pg_class update sends relcache invalidation.",
+   "issues": []
+  },
+  {
+   "target": "narration:function-cache.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-queries-embedded-in-functions-and-spi.1.r4",
+    "step-8-queries-embedded-in-functions-and-spi.1.r6",
+    "step-8-queries-embedded-in-functions-and-spi.3.s2"
+   ],
+   "justification": "PL/pgSQL static SQL uses SPI_keepplan plan-cache rules; EXECUTE is one-shot; SQL function cache owned by FmgrInfo fn_extra.",
+   "issues": []
+  },
+  {
+   "target": "narration:function-cache.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-queries-embedded-in-functions-and-spi.1.r1",
+    "step-8-queries-embedded-in-functions-and-spi.5.s3",
+    "step-8-queries-embedded-in-functions-and-spi.5.s4",
+    "open-questions.30.1.1.s1"
+   ],
+   "justification": "Normally query lifetime, longer-lived FmgrInfo can retain within valid transaction; measured only for query-scoped callers.",
+   "issues": []
+  },
+  {
+   "target": "screen:function-cache:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-queries-embedded-in-functions-and-spi.1.r4"
+   ],
+   "justification": "PL/pgSQL static SQL uses SPI plans.",
+   "issues": []
+  },
+  {
+   "target": "screen:function-cache:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-queries-embedded-in-functions-and-spi.1.r6"
+   ],
+   "justification": "EXECUTE is one-shot planned every time.",
+   "issues": []
+  },
+  {
+   "target": "screen:function-cache:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-queries-embedded-in-functions-and-spi.3.s2"
+   ],
+   "justification": "Owner is the calling FmgrInfo.",
+   "issues": []
+  },
+  {
+   "target": "screen:function-cache:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-8-queries-embedded-in-functions-and-spi.4.r2"
+   ],
+   "justification": "Owner and transaction ID determine reuse.",
+   "issues": []
+  },
+  {
+   "target": "narration:upper-operations.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-group-and-aggregate.5.s2",
+    "step-3-group-and-aggregate.5.s3",
+    "step-3-group-and-aggregate.5.s4",
+    "step-3-group-and-aggregate.6.s2",
+    "step-4-reorder-group-by-keys-to-fit-the-input-new-in-17.1.s4"
+   ],
+   "justification": "Hashed grouping needs hashable operators and no ordered or DISTINCT aggregate; partial aggregation needs combine and serialization functions; sorted grouping uses existing order; 17 reorders keys to match a sorted input path.",
+   "issues": []
+  },
+  {
+   "target": "narration:upper-operations.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-set-operations.1.s2",
+    "step-9-set-operations.1.s3",
+    "106-exceptions-and-limitations.1.r1"
+   ],
+   "justification": "UNION ALL is Append; UNION tries hash, sort plus Unique, or MergeAppend plus Unique; per-group sorts inside Agg are not priced (2666.19 versus 1665.15).",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-operations:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-group-and-aggregate.5.s3"
+   ],
+   "justification": "Hashed grouping needs hashable operators.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-operations:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-group-and-aggregate.5.s3",
+    "106-exceptions-and-limitations.1.r1"
+   ],
+   "justification": "Aggregate with ORDER BY or DISTINCT is not offered hashed grouping.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-operations:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-group-and-aggregate.5.s4"
+   ],
+   "justification": "Combine function needed for partial aggregation.",
+   "issues": []
+  },
+  {
+   "target": "screen:upper-operations:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-9-set-operations.1.s2",
+    "step-9-set-operations.1.s3"
+   ],
+   "justification": "UNION ALL is Append; UNION uses duplicate removal.",
+   "issues": []
+  },
+  {
+   "target": "narration:partition-plan.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-111-expand-the-parent-late-once-its-quals-are-known.1.s2",
+    "step-111-expand-the-parent-late-once-its-quals-are-known.2.s1",
+    "step-112-prune-partitions-with-constants.2.s1",
+    "step-112-prune-partitions-with-constants.2.s2",
+    "step-114-build-append-paths-from-the-childrens-paths.1.s2"
+   ],
+   "justification": "Late expansion, plan-time pruning on immutable key-versus-constant comparisons, surviving children get own paths combined by Append alternatives.",
+   "issues": []
+  },
+  {
+   "target": "narration:partition-plan.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-111-expand-the-parent-late-once-its-quals-are-known.3.s1",
+    "step-113-exclude-legacy-children-by-their-check-constraints.4.s2",
+    "118-planning-versus-execution.1.r2"
+   ],
+   "justification": "Legacy children locked and opened, parent a member, constraint exclusion by immutable CHECKs, no execution-time exclusion for legacy children.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-plan:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-111-expand-the-parent-late-once-its-quals-are-known.1.s2"
+   ],
+   "justification": "Expansion after quals distributed.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-plan:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-112-prune-partitions-with-constants.2.s1",
+    "step-112-prune-partitions-with-constants.2.s2"
+   ],
+   "justification": "Constants and immutable operators prune at plan time.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-plan:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-112-prune-partitions-with-constants.3.s3"
+   ],
+   "justification": "Each child gets its own cheapest path.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-plan:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-113-exclude-legacy-children-by-their-check-constraints.1.s2"
+   ],
+   "justification": "Constraint exclusion applies to legacy children.",
+   "issues": []
+  },
+  {
+   "target": "narration:partition-runtime.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-118-hand-the-executor-the-pruning-it-could-not-do.3.1.1.s1",
+    "step-118-hand-the-executor-the-pruning-it-could-not-do.3.2.1.s1",
+    "step-119-prune-while-starting-and-while-running.3.s1",
+    "step-119-prune-while-starting-and-while-running.5.s1"
+   ],
+   "justification": "Initial steps for stable operators or non-constant values, execution steps for PARAM_EXEC; rerun after rescan; forced generic plan shows Subplans Removed 12.",
+   "issues": []
+  },
+  {
+   "target": "narration:partition-runtime.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-119-prune-while-starting-and-while-running.2.s1",
+    "step-119-prune-while-starting-and-while-running.2.s3",
+    "116-exceptions-and-limitations.1.r9",
+    "step-115-keep-a-sort-order-without-merging-when-the-bounds-allow-it.1.s2",
+    "step-115-keep-a-sort-order-without-merging-when-the-bounds-allow-it.3.s3"
+   ],
+   "justification": "Plain EXPLAIN runs ExecutorStart so startup prunes; locks taken before startup pruning; ordered Append versus MergeAppend.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-runtime:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-118-hand-the-executor-the-pruning-it-could-not-do.3.1.1.s1"
+   ],
+   "justification": "Initial pruning steps.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-runtime:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-118-hand-the-executor-the-pruning-it-could-not-do.3.2.1.s1"
+   ],
+   "justification": "Execution steps for PARAM_EXEC.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-runtime:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-119-prune-while-starting-and-while-running.3.s1"
+   ],
+   "justification": "Pruning again after a rescan with changed parameters.",
+   "issues": []
+  },
+  {
+   "target": "screen:partition-runtime:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "116-exceptions-and-limitations.1.r9"
+   ],
+   "justification": "Locks still taken for runtime-pruned partitions.",
+   "issues": []
+  },
+  {
+   "target": "narration:parallel-cost.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-121-decide-once-whether-parallelism-is-possible-at-all.1.s2",
+    "step-122-mark-which-relations-may-run-in-a-worker.2.s1",
+    "step-122-mark-which-relations-may-run-in-a-worker.3.s1",
+    "step-123-build-partial-paths.1.s1"
+   ],
+   "justification": "Parallel eligibility checked first; restricted expression in quals refuses parallelism for the relation (E12.7b serial).",
+   "issues": []
+  },
+  {
+   "target": "narration:parallel-cost.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-124-choose-the-number-of-workers.1.s2",
+    "step-124-choose-the-number-of-workers.1.s3",
+    "step-124-choose-the-number-of-workers.2.s1",
+    "step-125-price-the-partial-path-and-the-gather.1.s2",
+    "step-125-price-the-partial-path-and-the-gather.1.s3",
+    "step-125-price-the-partial-path-and-the-gather.2.s1"
+   ],
+   "justification": "Workers from storage parameter, size rule and cap; CPU divided by parallel divisor, disk not divided; Gather adds setup and per-row cost.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-cost:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-121-decide-once-whether-parallelism-is-possible-at-all.1.s2"
+   ],
+   "justification": "Eligibility checked once at the top.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-cost:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-123-build-partial-paths.1.s3"
+   ],
+   "justification": "Partial paths each return their share.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-cost:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-125-price-the-partial-path-and-the-gather.1.s3"
+   ],
+   "justification": "CPU divided, disk part not divided.",
+   "issues": []
+  },
+  {
+   "target": "screen:parallel-cost:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-125-price-the-partial-path-and-the-gather.2.s1"
+   ],
+   "justification": "parallel_setup_cost and parallel_tuple_cost.",
+   "issues": []
+  },
+  {
+   "target": "narration:extensions.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "151-main-idea.1.s2",
+    "151-main-idea.1.s4",
+    "step-2-hooks-that-replace-a-stage.1.s2",
+    "step-3-hooks-that-edit-a-stages-output.2.r1",
+    "step-3-hooks-that-edit-a-stages-output.2.r2",
+    "step-4-foreign-data-wrappers-callback-by-callback.2.r4",
+    "step-4-foreign-data-wrappers-callback-by-callback.2.r9",
+    "155-eligibility-and-comparison.2.s1"
+   ],
+   "justification": "planner_hook wraps or replaces standard_planner; hooks edit relation info and path lists; FDW callbacks size, path and plan, with remote push-down of joins and upper stages.",
+   "issues": []
+  },
+  {
+   "target": "narration:extensions.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "155-eligibility-and-comparison.1.s1",
+    "155-eligibility-and-comparison.1.s2",
+    "step-5-custom-scans.1.s1",
+    "step-5-custom-scans.1.s2",
+    "open-questions.2.4.1.s1"
+   ],
+   "justification": "Extension paths compete via add_path; custom scan provider adds CustomPaths and builds CustomScan if one wins; no in-core provider so described from source.",
+   "issues": []
+  },
+  {
+   "target": "screen:extensions:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-hooks-that-replace-a-stage.1.s2"
+   ],
+   "justification": "planner_hook can run the standard planner around or replace it.",
+   "issues": []
+  },
+  {
+   "target": "screen:extensions:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-hooks-that-edit-a-stages-output.2.r2"
+   ],
+   "justification": "set_rel_pathlist_hook adds or edits paths.",
+   "issues": []
+  },
+  {
+   "target": "screen:extensions:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-foreign-data-wrappers-callback-by-callback.2.r5",
+    "step-4-foreign-data-wrappers-callback-by-callback.2.r9"
+   ],
+   "justification": "GetForeignPaths and GetForeignPlan.",
+   "issues": []
+  },
+  {
+   "target": "screen:extensions:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "155-eligibility-and-comparison.1.s1"
+   ],
+   "justification": "Extension paths win or lose like core paths.",
+   "issues": []
+  },
+  {
+   "target": "narration:support-functions.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-access-methods.1.s1",
+    "step-6-access-methods.2.r1",
+    "step-6-access-methods.2.r6",
+    "step-6-access-methods.2.r7",
+    "step-6-access-methods.4.s1"
+   ],
+   "justification": "AM flags decide ordering, returnable columns and scans; amcostestimate prices the index; table AM supplies relation_estimate_size.",
+   "issues": []
+  },
+  {
+   "target": "narration:support-functions.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-support-functions-and-catalog-attributes.1.s1",
+    "step-7-support-functions-and-catalog-attributes.1.s2",
+    "step-7-support-functions-and-catalog-attributes.2.r5",
+    "step-3-match-each-clause-to-an-index-column.8"
+   ],
+   "justification": "Support functions answer simplify, selectivity, cost, rows, index condition requests; NULL means defaults; LIKE gives a lossy range with Filter retained.",
+   "issues": []
+  },
+  {
+   "target": "screen:support-functions:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-access-methods.1.s1"
+   ],
+   "justification": "AM flags in IndexAmRoutine.",
+   "issues": []
+  },
+  {
+   "target": "screen:support-functions:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-access-methods.2.r7"
+   ],
+   "justification": "amcostestimate called from cost_index.",
+   "issues": []
+  },
+  {
+   "target": "screen:support-functions:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-support-functions-and-catalog-attributes.1.s1"
+   ],
+   "justification": "Support function answers requests.",
+   "issues": []
+  },
+  {
+   "target": "screen:support-functions:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-support-functions-and-catalog-attributes.1.s2"
+   ],
+   "justification": "NULL result means planner falls back to defaults.",
+   "issues": []
+  },
+  {
+   "target": "narration:diagnose-rows.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "161-main-idea.1.s2",
+    "161-main-idea.1.s3",
+    "step-3-find-the-first-divergence.1.s1",
+    "step-3-find-the-first-divergence.4.s1"
+   ],
+   "justification": "EXPLAIN estimates, ANALYZE runs it; compare from leaves up; customers scan 10 estimated, 98 found.",
+   "issues": []
+  },
+  {
+   "target": "narration:diagnose-rows.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-2-read-one-node.2.s2",
+    "step-2-read-one-node.2.s3",
+    "step-3-find-the-first-divergence.3"
+   ],
+   "justification": "10 x 98 = 980 approximates total work; join reports 1008; difference is rounding of inner average.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-rows:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "162-values-and-structures.2.s4"
+   ],
+   "justification": "Compare per-execution figures.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-rows:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-find-the-first-divergence.1.s1"
+   ],
+   "justification": "Read from the leaves up.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-rows:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "162-values-and-structures.2.s5"
+   ],
+   "justification": "Multiply actual rows by loops for total work.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-rows:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-3-find-the-first-divergence.4.s1"
+   ],
+   "justification": "Customers scan 10 estimated, 98 found.",
+   "issues": []
+  },
+  {
+   "target": "narration:diagnose-method.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.3.r1",
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.3.r3",
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.4.s1"
+   ],
+   "justification": "Penalty switches add disable_cost 1.0e10 and keep the path; gate switches such as hash and merge join (except full join) build no path.",
+   "issues": []
+  },
+  {
+   "target": "narration:diagnose-method.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "167-formulas-and-worked-examples.5.s2",
+    "167-formulas-and-worked-examples.7.s6",
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.5.r1",
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.6.s1"
+   ],
+   "justification": "E16.6b penalized sequential winner while bitmap alternative is eligible but also penalized; check eligibility rules and cost inputs.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-method:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.3.r1"
+   ],
+   "justification": "Penalty switches keep paths.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-method:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.3.r3"
+   ],
+   "justification": "Gate switches prevent generation.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-method:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-4-tell-a-missing-alternative-from-an-expensive-one.4.s1"
+   ],
+   "justification": "Full join exception.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnose-method:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "167-formulas-and-worked-examples.7.s6"
+   ],
+   "justification": "Penalized winner does not show bitmap ineligible.",
+   "issues": []
+  },
+  {
+   "target": "narration:diagnostic-tools.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-check-the-settings-in-effect-and-how-to-change-them.1.s2",
+    "step-5-check-the-settings-in-effect-and-how-to-change-them.1.s4",
+    "step-6-diagnose-planning-time.1.s2",
+    "step-6-diagnose-planning-time.1.s4",
+    "step-6-diagnose-planning-time.1.s5",
+    "open-questions.2.6.1.s1"
+   ],
+   "justification": "SETTINGS lists GUC_EXPLAIN-flagged non-default settings; MEMORY planner allocations; SUMMARY planning time never recorded; memory from one platform.",
+   "issues": []
+  },
+  {
+   "target": "narration:diagnostic-tools.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-diagnose-a-generic-plan.2.s1",
+    "step-7-diagnose-a-generic-plan.2.s3",
+    "step-7-diagnose-a-generic-plan.2.s4",
+    "166-exceptions-and-limitations.1.r2"
+   ],
+   "justification": "EXPLAIN EXECUTE shows plan the cache would use now; counters in pg_prepared_statements; GENERIC_PLAN rejected with ANALYZE.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnostic-tools:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-5-check-the-settings-in-effect-and-how-to-change-them.1.s2"
+   ],
+   "justification": "SETTINGS shows non-default flagged settings.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnostic-tools:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-6-diagnose-planning-time.1.s2"
+   ],
+   "justification": "MEMORY reports what planning consumed.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnostic-tools:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "step-7-diagnose-a-generic-plan.2.s1"
+   ],
+   "justification": "EXPLAIN EXECUTE shows the plan the cache would use now.",
+   "issues": []
+  },
+  {
+   "target": "screen:diagnostic-tools:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "166-exceptions-and-limitations.1.r2"
+   ],
+   "justification": "GENERIC_PLAN with ANALYZE is rejected.",
+   "issues": []
+  },
+  {
+   "target": "narration:limits.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.2.1.1.s2",
+    "open-questions.2.4.1.s1",
+    "open-questions.2.6.1.s1",
+    "step-5-check-the-settings-in-effect-and-how-to-change-them.5.s9"
+   ],
+   "justification": "No LLVM, no core custom scan, memory from one platform, forced setting is no evidence 1.1 suits a real server.",
+   "issues": []
+  },
+  {
+   "target": "narration:limits.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.34.2.1.s1",
+    "161-main-idea.2.s2",
+    "main-idea.5.1.1.s5"
+   ],
+   "justification": "No feedback conclusion rests on planner inputs and instrumentation lifecycle; counts printed and discarded.",
+   "issues": []
+  },
+  {
+   "target": "screen:limits:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.2.1.1.s2"
+   ],
+   "justification": "Source-only behavior described separately.",
+   "issues": []
+  },
+  {
+   "target": "screen:limits:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.2.1.1.s1"
+   ],
+   "justification": "JIT not demonstrated.",
+   "issues": []
+  },
+  {
+   "target": "screen:limits:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "open-questions.2.4.1.s1"
+   ],
+   "justification": "No in-core custom scan provider.",
+   "issues": []
+  },
+  {
+   "target": "screen:limits:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "161-main-idea.2.s2",
+    "main-idea.5.1.1.s5"
+   ],
+   "justification": "Planner does not learn from a run.",
+   "issues": []
+  },
+  {
+   "target": "narration:recap.n1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.2.4.1.s2",
+    "final-causal-summary.2.5.1.s3",
+    "final-causal-summary.2.6.1.s2",
+    "final-causal-summary.2.7.1.s2"
+   ],
+   "justification": "Current file size times stored density, MCV frequencies, path comparison, bounded sort and Limit, plan tree and PlannedStmt.",
+   "issues": []
+  },
+  {
+   "target": "narration:recap.n2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.2.8.1.s2",
+    "final-causal-summary.2.8.1.s3",
+    "final-causal-summary.2.8.1.s4",
+    "final-causal-summary.2.9.1.s2",
+    "final-causal-summary.4.s3"
+   ],
+   "justification": "Executor finds 3019, 200, 290 rows; adapts inside the plan; only input changes alter the next plan.",
+   "issues": []
+  },
+  {
+   "target": "screen:recap:1",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.2.4.1.s2"
+   ],
+   "justification": "Stored density and MCV frequencies give rows.",
+   "issues": []
+  },
+  {
+   "target": "screen:recap:2",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.2.5.1.s3"
+   ],
+   "justification": "Path comparison keeps the hash join.",
+   "issues": []
+  },
+  {
+   "target": "screen:recap:3",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.2.7.1.s2"
+   ],
+   "justification": "Cheapest path becomes a Plan tree.",
+   "issues": []
+  },
+  {
+   "target": "screen:recap:4",
+   "factual": true,
+   "verdict": "supported",
+   "evidence": [
+    "final-causal-summary.2.8.1.s4",
+    "final-causal-summary.4.s3"
+   ],
+   "justification": "Executor does not report back; only input changes make the planner choose again.",
+   "issues": []
+  },
+  {
+   "target": "narration:credits.n1",
+   "factual": false,
+   "verdict": "not_factual",
+   "evidence": [],
+   "justification": "Framing close; names no technical behavior.",
+   "issues": []
+  }
+ ],
+ "editorial": [
+  {
+   "scene": "pipeline",
+   "code": "clarity",
+   "severity": "minor",
+   "message": "pipeline.n2 opens with filler ('Utility statements require a distinction') and hedges the source with 'commonly'; the source says every other statement is wrapped unchanged in a CMD_UTILITY Query."
+  },
+  {
+   "scene": "pipeline",
+   "code": "missing_caveat",
+   "severity": "minor",
+   "message": "pipeline.n1 says parse analysis uses a snapshot; the page says analysis pushes a snapshot only if it needs one."
+  },
+  {
+   "scene": "index-cost",
+   "code": "other",
+   "severity": "minor",
+   "message": "index-cost.n2 adds a disclaimer ('not recommendations for a server's settings') that the cited text does not state; the page makes a similar point only for the 1.1 setting in the diagnosis chapter."
+  },
+  {
+   "scene": "sublinks",
+   "code": "clarity",
+   "severity": "minor",
+   "message": "sublinks.n2 says the page's two examples 'return the same rows'; the page only shows both plans and says NOT NULL declarations are not examined. Consider dropping the clause."
+  },
+  {
+   "scene": "cte-choice",
+   "code": "other",
+   "severity": "minor",
+   "message": "cte-choice.n2 closing sentence ('The spelling of WITH alone does not tell you which behavior applies') is a synthesized takeaway; it adds no fact but is not in the source."
+  },
+  {
+   "scene": "parallel-jit",
+   "code": "missing_caveat",
+   "severity": "minor",
+   "message": "parallel-jit.n1 says the leader runs the plan with fewer workers; the source adds the condition that this holds with no workers or when the leader participates."
+  },
+  {
+   "scene": "table-size",
+   "code": "visual_mismatch",
+   "severity": "minor",
+   "message": "Screen line 4 says width affects costs; the narration does not cover width, and the source ties width to byte estimates deciding work_mem fit, which only indirectly affects cost."
+  }
+ ],
+ "summary": "All 296 targets judged against the pinned document and glossary. 294 are supported and 2 are not factual (framing), none contradicted. Shortening kept the required qualifications (forced settings labels, estimated versus measured, source-only notes, no-LLVM, 17-cycle additions). Only minor wording issues remain: pipeline.n1/n2 hedges, an added disclaimer in index-cost.n2, an inferred clause in sublinks.n2, a synthesized takeaway in cte-choice.n2, and a dropped leader-participation condition in parallel-jit.n1."
+}

@@ -21,8 +21,8 @@ from unittest.mock import patch
 from harness_fixture import accept_content, authored, recorded_content, recorded_review, write
 from pgvideo import cli
 from pgvideo.narration import create_narration
-from pgvideo.orchestration import (MAX_REPAIR_ROUNDS, check_instructions, duration_check, require_content_gate,
-                                   require_duration)
+from pgvideo.orchestration import (MAX_REPAIR_ROUNDS, check_instructions, duration_check, instructions,
+                                   require_content_gate, require_duration)
 from pgvideo.planning import import_plan
 from pgvideo.review import import_review
 from pgvideo.script import create_script
@@ -98,7 +98,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(self.load(run_dir, "last-result.json"), result)
         request = self.load(run_dir, "request.json")
         self.assertEqual(request["workflow"]["kind"], "harness")
-        self.assertEqual(request["workflow"]["instructions"]["version"], 2)
+        self.assertEqual(request["workflow"]["instructions"], instructions(self.workspace))
         self.assertEqual((request["settings"]["audience"], request["settings"]["target_minutes"]),
                          ("PostgreSQL administrators", 3.0))
         manifest = self.load(run_dir, "manifest.json")
@@ -425,18 +425,21 @@ class HarnessTests(unittest.TestCase):
     def test_a_new_instruction_version_reopens_the_content_stages(self):
         _result, run_dir = self.prepare()
         accept_content(self.workspace, run_dir)
+        current_version = instructions(self.workspace)["version"]
+        next_version = current_version + 1
         agents = self.workspace / "AGENTS.md"
         agents.write_text(agents.read_text(encoding="utf-8") + "\nOne more rule.\n", encoding="utf-8")
         self.assertEqual(len(check_instructions(self.workspace, run_dir)), 1)
         self.assertIn("content_review", self.load(run_dir, "manifest.json"))
-        agents.write_text(agents.read_text(encoding="utf-8").replace("instructions-version: 2",
-                                                                     "instructions-version: 3"), encoding="utf-8")
+        agents.write_text(agents.read_text(encoding="utf-8").replace(
+            f"<!-- instructions-version: {current_version} -->",
+            f"<!-- instructions-version: {next_version} -->"), encoding="utf-8")
         messages = check_instructions(self.workspace, run_dir)
         self.assertIn("resume", messages[-1])
         manifest = self.load(run_dir, "manifest.json")
         self.assertFalse({"plan", "script", "content_review"} & set(manifest))
         history = self.load(run_dir, "orchestration.json")["instructions"]["history"]
-        self.assertEqual([change["to"]["version"] for change in history], [2, 3])
+        self.assertEqual([change["to"]["version"] for change in history], [current_version, next_version])
         status, result, _stderr = self.command("resume", "--request", run_dir.name)
         self.assertEqual(status, 0, result)
         require_content_gate(run_dir, self.load(run_dir, "manifest.json"))

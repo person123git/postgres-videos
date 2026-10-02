@@ -46,7 +46,8 @@ that appear inside it.
 `request_id`, `evidence_digest` (the packet's `digests.content`), `audience`, `detail`, and `target_minutes`
 come from the request and the packet unchanged. `producer` describes you: `harness.name` and `version`, `model`
 (or `"unavailable"`), `prompt: "prompts/plan.md"`, and `usage`/`latency_seconds` only if your harness reports
-them. Never invent a model ID or a cost. Do not write statuses, issues, or estimates: pgvideo computes them.
+them. Never invent a model ID or a cost. Do not add tool-computed stage statuses, issue reports, or duration
+estimates. Do write the schema-required `feasibility.status`, claim assessments, and outline time budgets.
 
 ## Evidence IDs
 

@@ -25,9 +25,10 @@ the rationale for the harness workflow.
   Chromium. `scripts/setup` provisions all of them inside the project.
 - **An LLM harness** that can read repository instructions, run local commands,
   write JSON files, and run a separate review pass in a fresh context (a separate
-  session, a subagent, or a different model). The harness brings its own model
-  connection and credentials; pgvideo never calls a model and never
-  sees those credentials. A harness that cannot keep the review separate must
+  session, subagent, or model invocation without the writer's conversation,
+  reasoning, notes, or self-assessment). The harness brings its own model
+  connection and credentials; pgvideo never calls a model and never sees those
+  credentials. A harness that cannot keep the review separate must
   say so before production, as `AGENTS.md` requires.
 
 ## Quick start
@@ -308,7 +309,7 @@ credentials; `--drafter-command` adapters run offline too. See
 | Symptom | Cause and fix |
 | --- | --- |
 | The harness does not follow the workflow | Tell it to read `AGENTS.md`; not every harness loads it automatically. |
-| "not a separate review" | The review shared the writer's context. Run it in a fresh session or subagent, or with another model; a harness that cannot do that must report it. |
+| "not a separate review" | Use a fresh session, subagent, or model invocation with no writer conversation, reasoning, notes, or self-assessment. Changing the model alone is insufficient. Report it if this separation is unavailable. |
 | The model is unavailable, or credentials or quota ran out | Progress is saved. Fix the harness's model access and ask it to continue the request; `status` shows where it stopped. |
 | "does not match schemas/…" | The harness wrote malformed JSON or included fields pgvideo computes, such as statuses. It rewrites the file from the schema. |
 | "insufficient_evidence" or "missing evidence" | A claim needs a file or range that is not in the pinned snapshot. The claim is left out, or you decide what to do; pgvideo never substitutes other documentation. |

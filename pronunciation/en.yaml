@@ -45,6 +45,17 @@ terms:
   TAP: tap
   "NULL": "null"
   CTE: C T E
+  GEQO: G E Q O
+  MCV: M C V
+  FDW: F D W
+  LLVM: L L V M
+  B-tree: B tree
+  RelOptInfo: rel opt info
+  RelOptInfos: rel opt infos
+  PlannerInfo: planner info
+  PlannerGlobal: planner global
+  IndexOptInfo: index opt info
+  PlannedStmt: planned statement
   DDL: D D L
   DML: D M L
   LRU: L R U
@@ -90,6 +101,7 @@ parts:
   bufs: buffers
   ptr: pointer
   ctx: context
+  stmt: statement
   len: len
   cliplen: clip len
   mbcliplen: M B clip len

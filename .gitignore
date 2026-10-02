@@ -9,3 +9,11 @@ cache/
 .pytest_cache/
 runs/
 output/
+.DS_Store
+/.opencode/
+node_modules
+package.json
+package-lock.json
+bun.lock
+.gitignore
+/.scratch/
