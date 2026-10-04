@@ -15,8 +15,9 @@ replacement, even in chunks or under a new filename. Follow
 syntax error. Check what was actually saved; a failed call does not prove that nothing was written.
 
 1. Read the findings and locate affected entries. Read `scripts/pgvideo revise --help` before first use.
-2. Write a small JSON list of operations to `.scratch/<id>/fix1.json`. Each tool call must stay within
-   **40 lines AND 2,000 characters**, or the reduced limits recorded after a write failure.
+2. Write a small JSON list of operations to `.scratch/<id>/fix1.json`. Follow
+   [AGENTS.md's write-size limits](../AGENTS.md#write-size-limits): stay within the **32k-token** output budget
+   with headroom for the complete call, and honor any reduced limits recorded after a write failure.
 3. Run `jq empty .scratch/<id>/fix1.json`. Fix any syntax error in the patch before continuing.
 4. Apply it to your latest valid revision with a new output filename. `revise` preserves the source:
 
