@@ -1,4 +1,4 @@
-<!-- instructions-version: 5 -->
+<!-- instructions-version: 6 -->
 # AGENTS.md: pgvideo workflow
 
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
@@ -6,9 +6,33 @@ video request. For other tasks, do the requested work without starting a video.
 
 For all repository work, use the temporary-file convention below.
 
+## Read this first: execution rules
+
+1. For new multi-step work, create `.scratch/<task-or-request>/state.md` first. When resuming, read the
+   existing state first. Independent reviewers use their own `review-<n>/state.md` directory.
+2. Before a file write, use [the write decision table](#mandatory-file-writing-and-recovery).
+   **An existing plan, storyboard, or review that parses as JSON MUST be changed with
+   `scripts/pgvideo revise`. This includes files rejected by a schema or content check.**
+3. Each tool call may contain at most **40 lines AND 2,000 characters** of file content.
+   After a size failure or `Unterminated string`, inspect what was saved and reduce the next write.
+   **Never resend the whole file, even under a new name.**
+4. After a failed command, record its exact error and the next change in your state. Follow
+   [the recovery rules](#mandatory-file-writing-and-recovery) before retrying.
+5. For videos, run only the next permitted stage. Read the complete `status`, `issues`, and
+   `next_actions` after each command. Continue until delivery or an explicit stop condition below.
+
+The file limits apply to patches, heredocs, and helper scripts too. Splitting a complete replacement
+across calls does not make it an allowed repair. Do not regenerate an existing input with Python.
+
+## Video workflow scope
+
 For each video request, use the one Markdown document the user names in `person123git/postgres-llm-wiki`.
 You write the plan and storyboard and arrange an independent review. pgvideo validates artifacts, records
 stage statuses, generates Kokoro narration, renders the video, and delivers the files.
+
+Order: **prepare → plan → script → independent review → review import → build → inspect → deliver**.
+Each stage must pass before its dependent stage. Recovery uses `status` and resumes at the first incomplete
+or invalid stage; it does not start a new request.
 
 ## Rules that apply at every stage
 
@@ -91,36 +115,30 @@ directory per PostgreSQL version), but they play different roles.
 - Let pgvideo manage its runtime temporary files through `scripts/pgvideo`; the wrapper configures
   `.runtime/tmp/`. The `.scratch/` recommendation applies to files you create while working on the project.
 
-## Mandatory Context management
+## Mandatory state and bounded reads
 
 - For multi-step work, keep a concise `.scratch/<id>/state.md` with the objective, user constraints, request ID,
   decisions, completed work, next action, and relevant file paths or line ranges. Create it as the first action
   of the task, before the first `packet` read or input file; a compaction summary is not a substitute. Update it
   at stage boundaries, after every failed command with the exact error and what you will change, and before
   compaction when possible. Keep task notes out of `AGENTS.md`.
+  Track the latest valid input, latest imported input, patch paths, next unused revision filename, and
+  last confirmed write position for an unfinished first draft. Record the active write-size limit.
   Independent reviewers instead keep their own state in `.scratch/<id>/review-<n>/state.md`, using a separate
   directory for each review. They must never read the writer's state or other task notes.
 - Search with `rg` before reading files. Pass an explicit offset and a limit of at most 200 lines on every file
   read; a read without a limit can return more than the context holds. Expand or continue when needed. Avoid
   repeatedly loading entire files already inspected.
-- Never open `evidence-packet.json` or another JSON file under `runs/<id>/` with a file-read tool; the packet
-  is larger than a context window. Use `scripts/pgvideo packet`, which returns one bounded page at a time: the
-  index, one section, evidence by ID, glossary entries, or configuration facts. When its result reports more
-  than one page, read each page with `--page`.
+- Never open `evidence-packet.json` with a file-read tool. Use `scripts/pgvideo packet` for the index,
+  sections, evidence, glossary entries, and configuration facts. Read every page with `--page`.
+  Read other required artifacts, such as the accepted plan and storyboard, in bounded ranges; never
+  load an entire large JSON file under `runs/<id>/` into context.
 - Save lengthy command output and logs under `.scratch/<id>/`, then inspect relevant matches or line ranges.
   For workflow results, read the complete `status`, `issues`, and `next_actions` before continuing; a shortened
   preview is not a substitute for the required result checks.
-- Never put more than 40 lines (about 2,000 characters) of file content in one tool call; the output limit
-  truncates longer calls and the call fails with "Unterminated string". For a longer file, create it with
-  the file-write tool holding only the first chunk, then append each following chunk with a separate
-  `cat >> <file> <<'EOF'` command. Do not draft the file's content in your reasoning first. After the last
-  chunk, check a JSON file with `jq empty <file>` before importing it. If a call is truncated, continue
-  with a smaller chunk; never resend the whole file.
-- Never rerun a failed command unchanged. When an import reports invalid JSON, run `jq empty <file>` and read
-  20 lines on each side of the reported line. Check brackets before commas: every `{` and `[` opened above that
-  line must be closed, and each entry must sit in the array the schema names for it. If the same error remains
-  after two fixes, stop patching punctuation: rewrite the whole enclosing entry in a new revision file. This is
-  for a file that is not valid JSON; once it parses, change it only with `scripts/pgvideo revise`.
+- Use [the file-writing and recovery rules](#mandatory-file-writing-and-recovery) after any failed write
+  or import. Do not repeat a failed command without correcting its cause or confirming a transient cause
+  has cleared. A write-size failure always requires a smaller payload.
 - End a turn only when the task is complete or a rule here tells you to stop. Do not end a turn by announcing a
   next step; perform it with a tool call in the same turn.
 - Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
@@ -129,27 +147,106 @@ directory per PostgreSQL version), but they play different roles.
   eligible section with its ID, whether it is read, keep or omit, and for kept content the sentence, row, and
   evidence IDs you will use. Update the ledger after each section, before fetching the next one. Context limits
   never justify skipping eligible sections, caveats, corrections, resolutions, or the evidence of kept content.
-- After compaction or interruption, reread only your own task state. If it does not exist, create it from the
-  current `status` result before doing anything else. Continue from the first section the ledger
-  does not mark read; never start the packet again from the beginning. For video recovery, use the state to
-  identify the request, then obtain current workflow status as described below before acting. Verify relevant source text
-  before editing or making claims. Notes and summaries are navigation aids, not authoritative evidence or
-  replacements for exact text.
+- After compaction or interruption, read your own state first. For a video, identify the request and run
+  `status` before other workflow commands. If state is missing, create it from that result; for other tasks,
+  create it from the task context. Continue at the first section the ledger does not mark read.
+  Do not restart the packet. Verify relevant source text before editing or making claims; notes and
+  summaries locate evidence but do not replace it.
 - For video recovery, make the first workflow command
   `scripts/pgvideo status --request "<id>" --json`; follow the recovery and instruction-version rules below.
   Use its result for current stages, digests, repair budgets, and next actions. Preserve independent review
   isolation: do not give the reviewer the writer's task notes.
 
+## Mandatory file-writing and recovery
+
+Use the first matching row **before writing** a plan, storyboard, or review. Use `jq empty <file>` to test syntax;
+a schema rejection or `needs_review` result does **not** mean the JSON syntax is invalid.
+
+| File state | Required action |
+| --- | --- |
+| A write just failed or was cut off | Do failed-write recovery first, then classify the saved file again. |
+| No draft exists yet | Create the first draft in bounded chunks. |
+| First draft is still being assembled | Append the next chunk at the confirmed saved position; validate when complete. |
+| A complete draft parses as JSON | Write a small patch and run `scripts/pgvideo revise`. |
+| Latest draft is invalid; an earlier valid revision exists | Use that valid revision as `--from`; patch the needed changes. |
+| Complete first draft is invalid; no valid revision exists | Use the syntax-only recovery below. |
+
+**Forbidden repairs:** retyping the file, emitting its full content under a new filename, regenerating it with
+a helper script, or replacing its entire top-level arrays to change a few entries. Renaming the file,
+minifying JSON, or splitting the replacement into chunks does not make these repairs allowed.
+These restrictions apply even when the first import failed and nothing has been accepted yet.
+
+### Write-size limits
+
+- Send at most **40 lines AND 2,000 characters** of file content per tool call, across all writes in it.
+  Count patch text and helper-script content too. A single long line still counts toward the character limit.
+- For a first draft only, write the first chunk once; append later chunks in separate calls with
+  `cat >> <file> <<'EOF'`. Never repeat `>` on a partially written draft. Do not draft the full file in reasoning.
+- These limits bound content you send to tools. A file generated by `revise` may be much larger.
+
+### Required sequence for a valid existing input
+
+1. Read the findings and [prompts/repair.md](prompts/repair.md). Read `scripts/pgvideo revise --help`
+   before its first use. Locate the affected entries with `rg`, then read only the needed ranges.
+2. Write only the changed fields as a JSON patch in `.scratch/<id>/fix1.json`. Validate the patch with
+   `jq empty .scratch/<id>/fix1.json`. If it fails, fix the patch; do not touch the input.
+3. Apply the patch to the latest valid revision. Use a new output filename. Example for a plan:
+
+   ```sh
+   scripts/pgvideo revise --from .scratch/<id>/plan.v1.json --patch .scratch/<id>/fix1.json --out .scratch/<id>/plan.v2.json --json
+   ```
+
+4. Read `status`, `issues`, `next_actions`, and `changes`. Require `passed` and verify that the matched
+   paths and counts are intended. Run `jq empty` on the new revision and inspect the changed entries.
+5. Record the new valid revision in state. Import it with `plan --file`, `script --storyboard`, or
+   `review --file`, always with `--request <id>` and `--json`. Read the full result before continuing.
+
+`revise` takes no `--request`. Its `passed` result means only that the patch applied; the stage still
+needs its import. Never overwrite an existing revision or write into `runs/` or `output/`.
+If a patch is too large, split it into smaller patches and apply them sequentially to new revisions.
+Import the final revision after all required fixes. Do not repeat full arrays of unchanged entries.
+If `revise` fails, fix the named path, operation, or filename in a new patch or command; never fall back
+to rewriting the input. If `revise` is unavailable, stop and report that required capability.
+
+### Failed-write recovery
+
+After a size error, truncated call, or `Unterminated string`, do these steps in order:
+
+1. Record the exact error, target path, and attempted chunk in state. Do not retry the write yet.
+2. Check whether the file exists. If it does, read its final saved range and check JSON syntax when
+   the file should be complete. A failed call may have saved nothing, some content, or all content.
+3. If a plan, storyboard, or review parses as JSON, return to the required `revise` sequence. For an unfinished draft
+   or patch, resume only from the confirmed saved position; never resend or duplicate saved content.
+4. Halve the failed payload, capped at **20 lines AND 1,000 characters**. If it fails again, halve it again,
+   capped at **10 lines AND 500 characters**. Never increase a reduced limit; record it for this task.
+5. If the second smaller retry also fails, stop and report the exact error, saved paths, and the write
+   capability needed to continue. Do not start the file again or claim the stage succeeded.
+
+### Syntax-only recovery: no valid revision exists
+
+Use this exception only when `jq empty` fails and there is no earlier valid input to patch.
+`revise` needs a parseable input; a schema error does not qualify for this exception.
+
+1. Read the parser error and 20 lines on each side of the reported line. Check the enclosing entry:
+   close each `{` and `[` correctly, then check commas, quotes, and the schema's array structure.
+2. Preserve the broken draft. Use a filesystem copy to a new scratch filename, then make a small
+   syntax edit in that copy. This exception permits copying on disk, never emitting the full file again.
+3. Run `jq empty` after each fix. After two unsuccessful syntax fixes, replace only the smallest
+   broken entry in bounded chunks. Do not replace the whole document or its top-level arrays.
+4. If the entry repair still fails, stop and report the parser error and file path. If it passes,
+   record this as the valid input; every later content or schema fix MUST use `revise`.
+
 ## Writing JSON files
 
-Every `.json` file you write must be strict, valid JSON (RFC 8259). After writing or editing one, validate it:
+Every completed `.json` file you write must be strict, valid JSON (RFC 8259). Validate it after the last
+chunk and after every edit, including patches and revisions produced by `revise`:
 
 ```sh
 jq empty path/to/file.json && echo OK
 ```
 
-If validation fails, follow the invalid-JSON rule in the section above, fix the file, and validate again.
-Never import a JSON file, or finish a task, while a JSON file you wrote is invalid.
+If validation fails, follow the recovery rules above. Never import invalid or unfinished JSON.
+If a stop rule applies, record unfinished files in state; do not claim they are complete.
 
 - Use double quotes for all keys and strings, never single quotes.
 - Put no trailing comma after the last item in an object or array.
@@ -174,33 +271,19 @@ Correct:
 }
 ```
 
-Wrong:
-
-```
-{
-  'name': 'widget',   // comment
-  "count": "3",
-  "enabled": True,
-  "tags": ["a", "b",],
-}
-```
-
-- **Large or generated files.** For a file over about 100 lines, or one built from data, you may write a short
+- **Large first drafts only.** For a new file over about 100 lines, or one built from data, you may write a short
   Python script in `.scratch/<id>/` that builds the object and calls
   `json.dump(obj, f, indent=2, ensure_ascii=False)`, instead of typing JSON by hand. Run it with
-  `.venv/bin/python`. The script is file content too: the 40-line limit per tool call applies to it.
-- **Editing existing files.** Never retype a plan, storyboard, or review you already wrote: a whole file is
-  longer than your output limit, and a cut-off call writes nothing. Write a patch of at most 40 lines and apply
-  it with `scripts/pgvideo revise --from <file> --patch <patch> --out <new revision> --json`; the paths and
-  operations are in [prompts/repair.md](prompts/repair.md). `revise` writes valid JSON under the new filename
-  and leaves the old file unchanged. For other JSON files, read the part you will change, and its enclosing
-  entry, in bounded chunks first, and rewrite that entry rather than patching punctuation, so brackets stay
-  balanced. Keep existing key names and structure unless asked to change them. This applies only to your own
-  input files; never edit the JSON pgvideo owns under `runs/<id>/`.
+  `.venv/bin/python`. Each call that writes the helper must obey both size limits above. A helper may create
+  the first draft; it MUST NOT recreate a plan, storyboard, or review to repair it.
+- **Existing inputs.** Follow the required `revise` sequence above. For other JSON files you own, read the
+  enclosing entry in bounded ranges and edit only that entry. Keep key names and structure unless asked
+  to change them. Never edit the JSON pgvideo owns under `runs/<id>/`.
 
 ## Tool use and file ownership
 
 - Run project commands through `scripts/pgvideo`. Read `scripts/pgvideo <command> --help` before first use.
+  Exception: `doctor` has no `--help`; run it directly.
 - Check the environment with `scripts/pgvideo doctor`. If provisioning is needed, use `scripts/setup` once,
   then check again. Do not install host packages, bypass the sandbox, or run project Python another way.
 - Run every script with the project virtual environment, `.venv/`. `scripts/pgvideo` already uses
@@ -232,6 +315,7 @@ Interpret `next_actions[].action` as follows:
 
 - `run`: run the specified command with `--json`.
 - `author`: write or revise the named phase's input, then import it with the specified command and `--json`.
+  Create a draft only if none exists. For an existing valid JSON input, `author` means patch with `revise`.
 - `escalate`: stop and report the exact issue, request ID, relevant report, and decision or action needed.
 - `deliver`: perform the inspection and delivery checklist below.
 
@@ -348,10 +432,11 @@ Build only after pgvideo accepts the current plan, storyboard, and independent r
 ## 5. Repair only when a result requests it
 
 - Follow [prompts/repair.md](prompts/repair.md) for a plan, storyboard, or review that failed or needs review.
-  Change only the items named in the findings.
-- Patch, never retype: write the changes as a small patch and apply it with `scripts/pgvideo revise`, which
-  writes the next revision. A result folds repeated issues into one issue with a `count`, the IDs it names, and
-  `examples`; fix the rule they show with one `[*]` operation, not one edit per entry.
+  Change only the items named in the findings and references that must change with them.
+- Use [the mandatory revision sequence](#required-sequence-for-a-valid-existing-input): validate patch,
+  run `revise`, check its result, validate revision, then import. Schema failures follow this sequence too.
+  Repeated issues include a `count`, IDs, and `examples`. Use one `[*]` operation when the same correction
+  applies to every selected entry; otherwise select only the affected IDs.
 - For a plan's unaccounted sections, use `scripts/pgvideo packet --request "<id>" --omissions-template --plan
   "<file>"`; it writes the patch that omits them, and you set the reasons.
 - Import the revision as a new input file. Revalidate dependent stages; every changed storyboard needs a new
@@ -374,6 +459,7 @@ scripts/pgvideo build --request "<id>" --json
 Build narrates, measures duration, times, renders, validates, and delivers, reusing matching artifacts.
 If measured duration falls outside the target's ±15% tolerance, follow `next_actions`: one rewrite of optional
 detail is allowed with `script --duration-rewrite`, followed by a new independent review and another build.
+Make that duration revision with `revise`; the flag does not permit retyping the storyboard.
 Preserve mandatory content and the target. After that, report any remaining miss; pass `build --accept-duration`
 only when the user explicitly accepts the measured length. Do not spend another rewrite or invent padding.
 
