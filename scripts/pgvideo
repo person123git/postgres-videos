@@ -8,6 +8,8 @@ esac
 script_dir=$(CDPATH= cd -- "$script_dir" && pwd -P)
 project_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
 unset PGVIDEO_ENV_READY PGVIDEO_LOCAL_ENV PGVIDEO_SANDBOX
+# Keep the dynamic loader from adding inherited libraries to the project's Python.
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT
 for path in .venv .venv/bin .venv/bin/python .runtime cache; do
     if [ -L "$project_root/$path" ]; then
         echo "pgvideo: $path must not be a symlink" >&2

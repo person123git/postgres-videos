@@ -9,6 +9,8 @@ esac
 script_dir=$(CDPATH= cd -- "$script_dir" && pwd -P)
 project_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
 unset PGVIDEO_ENV_READY PGVIDEO_LOCAL_ENV PGVIDEO_SANDBOX
+# Keep the dynamic loader from adding inherited libraries to the project's Python.
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT
 cd "$project_root"
 
 if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != --offline ]; }; then
@@ -31,12 +33,12 @@ for path in .runtime .runtime/python .runtime/python/bin .venv .venv/bin cache c
 done
 /bin/mkdir -p .runtime/python .runtime/home .runtime/tmp cache/downloads cache/wheels
 
-runtime_archive=cache/downloads/cpython-3.11.16-20260924-aarch64-apple-darwin.tar.gz
-runtime_url='https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only.tar.gz'
-runtime_sha='d718e3c5c6f4b225ed25f88bf65e4c5d314e0dea0d716ea50bc9d038630c502b'
+runtime_archive=cache/downloads/cpython-3.11.16-20260924-x86_64-unknown-linux-gnu.tar.gz
+runtime_url='https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.11.16%2B20260924-x86_64-unknown-linux-gnu-install_only.tar.gz'
+runtime_sha='49a52eb189878431a36efd137e7cd08f6429e59dc049b9cfb030bf706eb33fd4'
 
-if [ "$(/usr/bin/uname -s)" != Darwin ] || [ "$(/usr/bin/uname -m)" != arm64 ]; then
-    echo 'setup: this lock supports macOS arm64 only' >&2
+if [ "$(/usr/bin/uname -s)" != Linux ] || [ "$(/usr/bin/uname -m)" != x86_64 ]; then
+    echo 'setup: this lock supports Linux x86_64 only' >&2
     exit 1
 fi
 if [ ! -f "$runtime_archive" ]; then
@@ -47,7 +49,7 @@ if [ ! -f "$runtime_archive" ]; then
     HOME="$project_root/.runtime/home" TMPDIR="$project_root/.runtime/tmp" \
         /usr/bin/curl -q -fL --retry 3 "$runtime_url" -o "$runtime_archive"
 fi
-if ! printf '%s  %s\n' "$runtime_sha" "$runtime_archive" | /usr/bin/shasum -a 256 -c -; then
+if ! printf '%s  %s\n' "$runtime_sha" "$runtime_archive" | /usr/bin/sha256sum -c -; then
     echo 'setup: local Python archive checksum differs from tools.lock' >&2
     exit 1
 fi

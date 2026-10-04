@@ -1,17 +1,23 @@
 {
-  "platform": {"system": "Darwin", "architecture": "arm64", "python_abi": "cp311", "minimum_macos": "14.0"},
+  "platform": {"system": "Linux", "architecture": "x86_64", "python_abi": "cp311", "minimum_glibc": "2.28"},
   "python": {
     "version": "3.11.16",
     "release": "20260924",
-    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only.tar.gz",
-    "sha256": "d718e3c5c6f4b225ed25f88bf65e4c5d314e0dea0d716ea50bc9d038630c502b",
-    "archive": "cache/downloads/cpython-3.11.16-20260924-aarch64-apple-darwin.tar.gz",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.11.16%2B20260924-x86_64-unknown-linux-gnu-install_only.tar.gz",
+    "sha256": "49a52eb189878431a36efd137e7cd08f6429e59dc049b9cfb030bf706eb33fd4",
+    "archive": "cache/downloads/cpython-3.11.16-20260924-x86_64-unknown-linux-gnu.tar.gz",
     "executable": ".runtime/python/bin/python3.11",
-    "executable_sha256": "f6eedb649c0655db7a957280b49cd5df593c86053aed61ee770935d48b580f45",
-    "shared_library": ".runtime/python/lib/libpython3.11.dylib",
-    "shared_library_sha256": "edebe2287a190e3250adaf690fbec660df037e7972f205a106437b0b2419ed23"
+    "executable_sha256": "1d62607d5ea8c732b6e1157d34db3579359dc3f5cf89c232d3f7b5f2d2cac05d",
+    "shared_library": ".runtime/python/lib/libpython3.11.so.1.0",
+    "shared_library_sha256": "cbc579dde7d16c9a02aeb9ce419d2d48f2193426058c2b509900b3f3dec9ee0b"
   },
   "python_wheels": {"index_url": "https://pypi.org/simple", "lockfile": "requirements.lock", "wheelhouse": "cache/wheels"},
+  "torch": {
+    "version": "2.14.0+cpu",
+    "url": "https://download.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl",
+    "sha256": "673dbf5c9bbadfffab7a386b6dd7a0c219f1408a328b7b4e86d0ae551cdafa42",
+    "path": "cache/wheels/torch-2.14.0+cpu-cp311-cp311-manylinux_2_28_x86_64.whl"
+  },
   "spacy_model": {
     "version": "3.8.0",
     "url": "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
@@ -20,28 +26,28 @@
   },
   "ffmpeg": {
     "version": "9.0.2",
-    "build": "1789931890_9.0.2",
+    "build": "1789931100_9.0.2",
     "ffmpeg": {
-      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
-      "sha256": "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
-      "archive": "cache/downloads/mr-ffmpeg.zip",
+      "url": "https://ffmpeg.martin-riedl.de/download/linux/amd64/1789931100_9.0.2/ffmpeg.zip",
+      "sha256": "fa8ecf4abbd290d98f7d188b8649cc6b391ae209a98452be955a15aab1909d7f",
+      "archive": "cache/downloads/mr-ffmpeg-linux-amd64.zip",
       "executable": ".runtime/bin/ffmpeg",
-      "binary_sha256": "2e11c6f90993cdb79fff84d3f90044d28316b310e75b3e030cfc9a54f2c9d384"
+      "binary_sha256": "2624cfce1acdb259fe72b6d020dac937a1e7e66cf3578d8c4d43704e69a42cba"
     },
     "ffprobe": {
-      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
-      "sha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
-      "archive": "cache/downloads/mr-ffprobe.zip",
+      "url": "https://ffmpeg.martin-riedl.de/download/linux/amd64/1789931100_9.0.2/ffprobe.zip",
+      "sha256": "3f428c49070be3d24ec338602b76d412e401ffcb8a5641ef0e729181a232fc32",
+      "archive": "cache/downloads/mr-ffprobe-linux-amd64.zip",
       "executable": ".runtime/bin/ffprobe",
-      "binary_sha256": "2738aa46a7f9acbc8ab09a6715554c90f7de603171ac403726765685df6a0059"
+      "binary_sha256": "fa300ee31cd55e7a8d052f16d017fde3b68d842dff39e0c29575ced5278947d6"
     }
   },
   "espeak_ng": {
     "version": "1.52.0",
-    "source_wheel": "espeakng_loader-0.2.4-py3-none-macosx_11_0_arm64.whl",
-    "source_sha256": "d27cdca31112226e7299d8562e889d3e38a1e48055c9ee381b45d669072ee59f",
-    "library": ".runtime/lib/libespeak-ng.dylib",
-    "library_sha256": "bb635eee1ee9c456f4a5cf06fb6cb352ecdd4d61e1951743b423ef22bb57f470",
+    "source_wheel": "espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    "source_sha256": "08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d",
+    "library": ".runtime/lib/libespeak-ng.so",
+    "library_sha256": "b15ce0803b26254e8a0d088c6b9281a2637b2b02613147cc320cfdefaf2c3ccf",
     "executable": ".runtime/bin/espeak-ng",
     "executable_type": "project-local CLI for the pinned native library",
     "data": ".runtime/share/espeak-ng-data",
@@ -52,14 +58,14 @@
     "chromium_version": "153.0.8010.12",
     "revision": "1243",
     "headless_shell": {
-      "url": "https://cdn.playwright.dev/builds/cft/153.0.8010.12/mac-arm64/chrome-headless-shell-mac-arm64.zip",
-      "sha256": "89d80a6d26ccd0ccfd51e22d9e1297283862af2b0cd91dce07459b35ca0059f2",
-      "archive": "cache/downloads/chrome-headless-shell-mac-arm64-153.0.8010.12.zip",
+      "url": "https://cdn.playwright.dev/builds/cft/153.0.8010.12/linux64/chrome-headless-shell-linux64.zip",
+      "sha256": "a9da028861a0cf789ff25c2fed45f5f1aaf969ed9247835b6a7821a4f7af9d1d",
+      "archive": "cache/downloads/chrome-headless-shell-linux64-153.0.8010.12.zip",
       "root": ".runtime/browsers/chromium_headless_shell-1243",
       "markers": ["INSTALLATION_COMPLETE", "DEPENDENCIES_VALIDATED"],
-      "binary": ".runtime/browsers/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell",
-      "binary_sha256": "a0bfe7b4da4787b66058477d696cd1d09065d25f06a548947722b9af77ee8282",
-      "tree_sha256": "6091601c86cf5f8bb2e8e012c21b5633b71c3bb6e9d8e2232392beb11b8b6580"
+      "binary": ".runtime/browsers/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell",
+      "binary_sha256": "ded93a9c9a53a1ae040f08124badcca95c938e9d5015ff340c3b5538c41bf39e",
+      "tree_sha256": "47df60c2c1c298c04ef26d2ab18187622527550f562c4e1e07acd650b02953c0"
     }
   },
   "kokoro": {

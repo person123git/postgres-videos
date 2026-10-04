@@ -35,7 +35,7 @@ def main() -> None:
     if not records:
         raise ValueError("wheelhouse is empty")
     lines = [
-        "# CPython 3.11, macOS arm64. Every direct, transitive, and build wheel is pinned.",
+        "# CPython 3.11, Linux x86_64. Every direct, transitive, and build wheel is pinned.",
         "# Generated from requirements.in with scripts/lock_wheels.py.",
         "--only-binary=:all:",
     ]

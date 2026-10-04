@@ -81,9 +81,9 @@ class RequestTests(unittest.TestCase):
     def test_request_manifest_records_environment_snapshot(self, _lookup):
         report = {
             "status": "passed", "project_root": str(self.workspace),
-            "python": {"version": "3.11.16"}, "platform": {"architecture": "arm64"},
-            "checks": {"assets": "passed"}, "os_requirements": ["macOS"],
-            "isolation_limitations": ["OS framework access"],
+            "python": {"version": "3.11.16"}, "platform": {"architecture": "x86_64"},
+            "checks": {"assets": "passed"}, "os_requirements": ["Linux"],
+            "isolation_limitations": ["local IPC"],
         }
         runtime = self.workspace / ".runtime"
         runtime.mkdir()

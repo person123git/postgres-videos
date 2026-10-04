@@ -5,7 +5,6 @@ Doctor runs this inside the offline sandbox and records the JSON line it prints.
 
 from __future__ import annotations
 
-import ctypes
 import json
 import struct
 import subprocess
@@ -26,7 +25,7 @@ TEMP = ROOT / ".runtime" / "tmp"
 FFMPEG = ROOT / ".runtime" / "bin" / "ffmpeg"
 FFPROBE = ROOT / ".runtime" / "bin" / "ffprobe"
 BUNDLED_FONTS = {"Inter", "Noto Sans Mono"}
-OS_IMAGE_PREFIXES = ("/System/", "/usr/lib/")
+OS_IMAGE_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/")
 
 
 def synthesize() -> dict:
@@ -143,14 +142,16 @@ def encode(audio: Path, image: Path) -> dict:
 
 
 def loaded_images() -> dict:
-    """Require every native image in this process to come from the project or macOS."""
-    dyld = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
-    dyld._dyld_image_count.restype = ctypes.c_uint32
-    dyld._dyld_get_image_name.restype = ctypes.c_char_p
-    dyld._dyld_get_image_name.argtypes = [ctypes.c_uint32]
-    names = [dyld._dyld_get_image_name(index).decode() for index in range(dyld._dyld_image_count())]
+    """Require every native image in this process to come from the project or the system libraries."""
+    names = set()
+    # Each line names a mapped range, its permissions, offset, device, inode, and, for a file, its path.
+    for line in Path("/proc/self/maps").read_text(encoding="utf-8").splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6 and "x" in fields[1] and fields[5].startswith("/"):
+            names.add(fields[5])
     project = [name for name in names if Path(name).resolve().is_relative_to(ROOT)]
-    outside = [name for name in names if name not in project and not name.startswith(OS_IMAGE_PREFIXES)]
+    outside = [name for name in names if name not in project
+               and not str(Path(name).resolve()).startswith(OS_IMAGE_PREFIXES)]
     if outside:
         raise RuntimeError(f"native libraries loaded from outside the project: {outside}")
     return {"project": len(project), "os": len(names) - len(project)}

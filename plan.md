@@ -23,7 +23,7 @@ need a live model and human judges have not been run; see Step 14.
 | Step | Status | Notes |
 | --- | --- | --- |
 | 1. Define the on-demand request | Done | `scripts/pgvideo prepare` (formerly `generate`) validates one document and writes `runs/<request-id>/request.json`. |
-| 2. Set up a project-contained environment | Done | macOS arm64 only. Every command runs under a macOS Seatbelt sandbox, and `doctor --sample` passes offline. |
+| 2. Set up a project-contained environment | Done | Linux x86_64 only since 2026-10-04 (macOS arm64 before). Every command runs under a Landlock and seccomp sandbox, and `doctor --sample` passes offline. |
 | 3. Snapshot the document and glossary together | Done | One resolved wiki commit, a verified PostgreSQL source snapshot, `sources.json`, `source-report.md`, and manifest provenance. |
 | 4. Parse the selected document | Done | `document.json` with stable section, block, and sentence IDs and extracted facts, plus a coverage map in `document.json` and `coverage.md`. |
 | 5. Index the glossary and select relevant entries | Done | A glossary index built for each request from the glossary it downloaded, and `glossary-matches.json` with ranked, version-scoped matches, ambiguous occurrences, and unmatched terms. |
@@ -124,11 +124,12 @@ Containment applies to project dependencies and application file access. The hos
 
 **Status: done.** Implementation notes:
 
-- `tools.lock` supports macOS arm64 only, with Python 3.11.16 under `.runtime/python/`. `requirements.in` lists the direct requirements. `requirements.lock` records every wheel with its SHA-256 digest.
+- `tools.lock` supports Linux x86_64 only, with Python 3.11.16 under `.runtime/python/`. `requirements.in` lists the direct requirements. `requirements.lock` records every wheel with its SHA-256 digest.
 - `scripts/setup` and `scripts/pgvideo` share `scripts/environment.py`, which uses only the standard library. After the first run, `scripts/setup --offline` rebuilds `.venv/` and `.runtime/` from `cache/`.
-- Every command runs under a macOS Seatbelt profile applied with `/usr/bin/sandbox-exec`. Reads, writes, and executables are limited to the project and a documented set of OS paths. IP networking is allowed only for `setup` and `generate`. Apple has deprecated `sandbox-exec`; if it is removed, commands fail instead of running unconfined.
-- `doctor` runs before every command. It checks interpreter and package locations, locked hashes, Mach-O dependencies, FFmpeg capabilities, fonts, and browser files, and it probes four accesses the sandbox must deny. `doctor --sample` synthesizes a Kokoro WAV offline, renders a 1920 × 1080 slide in headless Chromium, and encodes and fully decodes an H.264/AAC MP4.
-- `.runtime/environment-report.json` records the operating system requirements and the remaining limitations. Known outside access includes PyTorch's hard-coded `/tmp` OpenMP registration attempt and Chromium's reads through macOS frameworks. The sandbox denies both, and the sample still passes.
+- Every command applies a Landlock ruleset to itself and then re-executes. Reads, writes, and executables are limited to the project and a documented set of OS paths. IP networking is allowed only for `setup` and `generate`; for other commands a seccomp filter denies IPv4 and IPv6 sockets and Landlock denies TCP bind and connect. A kernel without Landlock ABI 4 (Linux 6.7) makes commands fail instead of running unconfined.
+- `doctor` runs before every command. It checks interpreter and package locations, locked hashes, ELF dependencies, FFmpeg capabilities, fonts, and browser files, and it probes four accesses the sandbox must deny. `doctor --sample` synthesizes a Kokoro WAV offline, renders a 1920 × 1080 slide in headless Chromium, and encodes and fully decodes an H.264/AAC MP4.
+- `.runtime/environment-report.json` records the operating system requirements and the remaining limitations. Known outside access includes Chromium's reads of the resolver, Vulkan, and MIME configuration and its UDP sockets, and the host programs that pip and `ctypes` try to run. The sandbox denies them, and the sample still passes.
+- Changed on 2026-10-04: the project moved from macOS arm64 to Linux x86_64. `tools.lock` and `requirements.lock` pin the Linux builds of the same versions; PyTorch is the CPU-only wheel from download.pytorch.org, because PyPI's Linux wheel depends on the CUDA libraries. Landlock and seccomp replace Seatbelt, ELF checks replace Mach-O checks, and `assets/fonts/fonts.conf` gives Chromium a Fontconfig configuration that lists only the bundled fonts, without which it loads no font on Linux. Headless Chromium's system libraries, such as NSS, are now a host prerequisite that `doctor` checks.
 - `scripts/pgvideo test` runs the unit tests inside the offline sandbox.
 - The launcher passes the application's and the test runner's exit status through; this change was made during Step 3.
 
@@ -475,6 +476,7 @@ Use deterministic checks for metadata, references, and version compatibility. Me
   - starting any allowed shell lists `/bin` and reads the shell binaries. The first audit found this through `scripts/espeak-ng-runtime`.
 
   No process ran an outside executable or opened an IP connection. The audit passed on 2026-09-29 in about 10 seconds. It does not cover metadata lookups, Mach IPC, the pre-sandbox bootstrap, or the network retrieval of `setup` and `generate`; the isolation report lists these limitations.
+- Changed on 2026-10-04, departing from item 8: the move to Linux removed `scripts/pgvideo audit` and `isolation.audit`. Landlock denies an access with an error and cannot terminate the process, and denied attempts appear only in the kernel audit log, which needs administrator rights, so Linux has no unprivileged kill-on-access audit. The findings above describe macOS. On Linux the denied attempts were observed once with `strace` on Ubuntu 26.04 (Linux 7.0) during `setup --offline` and `doctor --sample`; the README lists them under Containment. That observation is not repeatable by a project command, and the isolation report states this limitation.
 
 ## Step 13 — Choose the level of detail
 
@@ -663,7 +665,7 @@ Keep `.venv/`, `.runtime/`, `cache/`, and generated runs/outputs out of version 
 - [x] Every project Python command uses the local `.venv/`, backed by the project-local Python runtime, with no global/user package imports. (Step 2)
 - [x] All application dependencies, tools, models, fonts, caches, configuration, temporary files, and outputs remain inside the project directory. (Step 2; applies to all later steps)
 - [x] Missing local dependencies and paths escaping the project fail clearly; no global dependency fallback is used. (Steps 1–3)
-- [x] Setup and sample execution pass the isolation audit, with unavoidable operating system access documented in the environment report. (Step 2; `doctor --sample` passed on 2026-09-28)
+- [x] Setup and sample execution pass the isolation audit, with unavoidable operating system access documented in the environment report. (Step 2; `doctor --sample` passed on 2026-09-28. On Linux since 2026-10-04 the audit command does not exist; `doctor --sample` passed and the denied attempts were observed with `strace`.)
 - [x] A generation request requires one user-specified Markdown document. (Step 1)
 - [x] The document and glossary are read from the same resolved wiki commit. (Step 3)
 - [x] The subject and narrated terminology are checked against relevant glossary entries with the correct PostgreSQL version scope. (Steps 5 and 6; meaning is compared through deterministic checks only, without a language model.)

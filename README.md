@@ -13,7 +13,7 @@ measured audio, renders slides, and encodes, validates, and delivers the MP4.
 A later request with exactly the same inputs reuses the validated video.
 
 The Python runtime, packages, models, tools, caches, and outputs all stay inside
-this directory, and every pgvideo command runs in a macOS sandbox. The harness
+this directory, and every pgvideo command runs in a Linux sandbox. The harness
 follows [AGENTS.md](AGENTS.md); [docs/harness.md](docs/harness.md) is its
 command, evidence, and recovery reference. `plan.md` records the design and its
 decisions, and [docs/llm-video-generation-proposal.md](docs/llm-video-generation-proposal.md)
@@ -21,8 +21,15 @@ the rationale for the harness workflow.
 
 ## Prerequisites
 
-- **macOS on Apple silicon (arm64)** for the local runtime, Kokoro, FFmpeg, and
-  Chromium. `scripts/setup` provisions all of them inside the project.
+- **Linux on x86_64** for the local runtime, Kokoro, FFmpeg, and Chromium:
+  kernel 6.7 or newer with Landlock enabled, and glibc 2.28 or newer.
+  `scripts/setup` provisions all of them inside the project, except the system
+  libraries that headless Chromium links to. On Debian and Ubuntu these come
+  from `libnss3`, `libnspr4`, `libglib2.0-0`, `libdbus-1-3`, `libatk1.0-0`,
+  `libatk-bridge2.0-0`, `libatspi2.0-0`, `libasound2`, `libgbm1`, `libexpat1`,
+  `libudev1`, `libxkbcommon0`, `libx11-6`, `libxcb1`, `libxcomposite1`,
+  `libxdamage1`, `libxext6`, `libxfixes3`, and `libxrandr2`; recent releases
+  add a `t64` suffix to some of these names. `doctor` names a missing library.
 - **An LLM harness** that can read repository instructions, run local commands,
   write JSON files, and run a separate review pass in a fresh context (a separate
   session, subagent, or model invocation without the writer's conversation,
@@ -86,7 +93,6 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records a visual or listening check that was actually performed on the delivered video. | no |
 | `scripts/pgvideo narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage and the ones after it. The content gate applies. | no |
 | `scripts/pgvideo doctor [--sample]` | Checks the local environment and writes `.runtime/environment-report.json`. `--sample` also narrates, renders, and encodes a short offline sample. | no |
-| `scripts/pgvideo audit` | Repeats `setup --offline` and the sample under a sandbox profile that terminates any undocumented access outside the project. | no |
 | `scripts/pgvideo test` | Runs the test suite in the offline sandbox. | no |
 
 `<id>` is the request ID that `prepare` prints; it is also the request's
@@ -148,7 +154,7 @@ The other commands' options:
 
 | Status | Meaning |
 | --- | --- |
-| 0 | The stage passed, the video was validated and delivered, or the `setup`, `doctor`, `audit`, or `test` check passed. |
+| 0 | The stage passed, the video was validated and delivered, or the `setup`, `doctor`, or `test` check passed. |
 | 1 | An execution error, such as an invalid request or file, a missing local dependency, a failed download, an input that changed after it was checked, a refused content gate, or broken media. The message says what failed. |
 | 2 | Invalid command-line arguments. |
 | 3 | `needs_review`: the stage ran and found issues that need a repair or a decision. |
@@ -369,7 +375,6 @@ of its `storyboard.json`. They are never relabeled as LLM-generated.
 ```sh
 scripts/pgvideo doctor             # every check; runs before each command anyway
 scripts/pgvideo doctor --sample    # also a short offline narration, slide, and MP4
-scripts/pgvideo audit              # setup --offline and the sample under a kill-on-access profile
 scripts/pgvideo test               # unit and integration tests
 ```
 
@@ -399,6 +404,8 @@ credentials; `--drafter-command` adapters run offline too. See
 | The measured length misses the target | The harness rewrites optional detail once; then you accept the length or change the target in a new request. |
 | Media checks failed | See `quality-report.json`; repeat the media stage. Content is not regenerated. |
 | Command fails before starting | `scripts/pgvideo doctor` names the missing or changed local dependency; `scripts/setup --offline` restores it. |
+| "native dependency is missing" names a system library | Headless Chromium links to it. Install the distribution package that provides it; see [Prerequisites](#prerequisites). |
+| "project containment cannot be enforced" | The kernel is older than 6.7 or has Landlock disabled. Commands fail rather than run unconfined; see [Containment](#containment). |
 
 ## Where files go
 
@@ -423,7 +430,9 @@ directory under `runs/` is safe; its video and content can no longer be reused.
 `scripts/setup` provisions a project-local Python 3.11.16 runtime and `.venv/`,
 a hash-locked wheelhouse, the Kokoro model and voice, an English language model,
 bundled fonts, Playwright's headless Chromium, FFmpeg, and the eSpeak NG library
-and data. The current `tools.lock` supports macOS arm64. Setup downloads and
+and data. The current `tools.lock` supports Linux x86_64. PyTorch is the
+CPU-only build from download.pytorch.org, because PyPI's Linux wheel depends on
+the CUDA libraries, which narration on the CPU never loads. Setup downloads and
 verifies the pinned Python archive, creates `.venv/`, installs every locked
 artifact inside a networked project sandbox, and then runs `doctor --sample`
 offline. Every download is checked against a SHA-256 digest in
@@ -437,76 +446,114 @@ tools from the search path: it passes with an empty `PATH`.
 ### Containment
 
 The launcher replaces inherited Python, pip, cache, home, temporary, browser,
-TLS, and tool paths with project-local values. It then re-executes every
-command under a macOS Seatbelt profile through `/usr/bin/sandbox-exec`:
+font, TLS, and tool paths with project-local values, and drops `LD_PRELOAD`,
+`LD_LIBRARY_PATH`, and `LD_AUDIT`. Every command then confines itself before it
+re-executes: a Landlock ruleset limits file access, and for offline commands a
+seccomp filter denies IP sockets. Every program the command starts inherits
+both, and neither can be removed.
 
 | Command | Network | File access outside the project |
 | --- | --- | --- |
-| `setup`, `prepare` | allowed | denied except the operating system paths below |
-| `setup --offline`, `doctor`, `test`, and every other `scripts/pgvideo` command | IP connections denied | the same |
-| `audit` | IP connections terminate the process | the same, except that an undocumented attempt terminates the process; see [Isolation audit](#isolation-audit) |
+| `setup`, `prepare` | allowed | denied except the operating system paths below and the resolver configuration |
+| `setup --offline`, `doctor`, `test`, and every other `scripts/pgvideo` command | IP sockets denied | denied except the operating system paths below |
 
-Sandboxed processes may read file contents only inside the project,
-`/System` (excluding the data volume), `/usr/lib`, the time zone, ICU, and
-locale data under `/usr/share` and `/private/var/db/timezone`, `/dev`, and the
-root directory listing. They may write only inside the project and to
-`/dev/null`, terminals, and inherited descriptors. They may execute only
-project files and `/bin/sh` with its shell variants. Metadata lookups and Mach
-IPC to system services, such as DNS and font services, remain available. A
-command started by an already sandboxed process, such as the test suite, keeps
-that sandbox because macOS does not allow a different profile to be applied.
+Sandboxed processes may open files and list directories only inside the
+project and in:
 
-Some libraries look outside the project unless configured. The controlled
-environment sets `MAC_CHROMIUM_TMPDIR` because Chromium ignores `TMPDIR` on
-macOS. It points `SSL_CERT_FILE` at the hash-locked `certifi` bundle, sets
-`OPENSSL_CONF` to the null device, and sets `__CF_USER_TEXT_ENCODING` so that
-CoreFoundation does not read the real home directory. Setup installs
-`scripts/sitecustomize.py` into `.venv/`, so `mimetypes` uses Python's built-in
-table instead of host files such as `/etc/apache2/mime.types`.
+- `/usr/lib`, `/usr/lib64`, `/lib`, and `/lib64`: system libraries, the dynamic
+  loader, and the locale archive; and `/etc/ld.so.cache`, the loader's index;
+- `/usr/share/zoneinfo`;
+- `/etc/debian_version`, because pip names the distribution in its user agent
+  and fails when the file exists but cannot be read;
+- `/proc`;
+- `/sys/devices` and `/sys/bus/pci/devices`: PyTorch and Chromium read the
+  processor topology, and Chromium's GPU process exits unless it can list the
+  PCI devices;
+- `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/tty`, and
+  `/dev/pts`.
+
+`setup` and `prepare` may also read `/etc/resolv.conf`, `/run/systemd/resolve`,
+`/etc/hosts`, `/etc/nsswitch.conf`, `/etc/host.conf`, and `/etc/gai.conf` to
+resolve host names. Processes may write only inside the project and to
+`/dev/null` and terminals. They may execute only project files, `/bin/sh`,
+`/bin/bash`, `/bin/dash`, and the dynamic loader `/lib64/ld-linux-x86-64.so.2`,
+through which the kernel starts every dynamically linked program.
+
+Offline commands cannot create IPv4 or IPv6 sockets, which covers UDP, and
+cannot bind or connect TCP sockets. They cannot use `io_uring` either, because
+it can create a socket that the filter does not see. Metadata lookups,
+Unix-domain sockets, signals, and other local IPC remain available, so system
+services such as systemd-resolved and D-Bus can act for a process. A command
+started by an already sandboxed process, such as the test suite, keeps that
+sandbox; another layer could only narrow it.
+
+Landlock needs Linux 6.7 or newer (ABI 4) with the `landlock` security module
+enabled. On a kernel without it, commands fail rather than run unconfined.
+
+Some libraries look outside the project unless configured. Chromium on Linux
+loads no font, bundled or not, without a readable Fontconfig configuration, and
+the host's is outside the sandbox. The controlled environment therefore sets
+`FONTCONFIG_FILE` to `assets/fonts/fonts.conf`, which lists only the bundled
+fonts and keeps the font cache in `cache/fontconfig/`. It points
+`SSL_CERT_FILE` at the hash-locked `certifi` bundle and sets `OPENSSL_CONF` to
+the null device. Setup installs `scripts/sitecustomize.py` into `.venv/`, so
+`mimetypes` uses Python's built-in table instead of host files such as
+`/etc/mime.types`.
 
 `doctor` runs before every command. It checks interpreter and package
 locations, locked artifact hashes, FFmpeg capabilities, browser files, fonts,
-and writable directories. It parses the Mach-O load commands of every project
-binary and resolves `@rpath`, `@loader_path`, and absolute dependencies,
-without Xcode's `otool`; each must resolve inside the project or to a macOS
-system library. It also attempts four accesses that the sandbox must deny:
-writing `/private/tmp`, reading `/private/etc/hosts`, running `/usr/bin/true`,
-and, when offline, connecting to a TEST-NET address.
+and writable directories. It parses the ELF dynamic section of every project
+binary and resolves each needed library through `DT_RUNPATH` or `DT_RPATH`,
+with `$ORIGIN`, without binutils' `readelf`; each must resolve inside the
+project or to a system library under `/usr/lib`, `/usr/lib64`, `/lib`, or
+`/lib64`. A system library that is not installed fails this check by name. A
+library that only another project directory holds is accepted, because only the
+project can supply it. Doctor also attempts four accesses that the sandbox must
+deny: writing `/tmp`, reading `/etc/passwd`, running `/usr/bin/true`, and, when
+offline, connecting to a TEST-NET address.
 
 `doctor --sample` runs offline. It synthesizes a Kokoro WAV and renders a
 1920 × 1080 slide with headless Chromium, then encodes an H.264/AAC MP4 with
 `+faststart` and verifies it with ffprobe and a full decode. It confirms
 through the DevTools protocol that the slide text used only the fonts in
-`assets/fonts/`, and that every native library loaded by the sample came from
-the project or macOS. Outputs stay in `.runtime/tmp/`.
+`assets/fonts/`, and that every native library mapped by the sample came from
+the project or the system library directories. Outputs stay in `.runtime/tmp/`.
 
 Doctor writes `.runtime/environment-report.json` with the resolved paths,
-versions, sandbox profile, probe results, the last sample and audit results
-for the current locks and scripts, operating system requirements, and
-limitations.
+versions, sandbox profile, probe results, the last sample result for the
+current locks and scripts, operating system requirements, and limitations.
 Each request copies this snapshot into its `manifest.json`. Explicit
 `GITHUB_TOKEN`, `HF_TOKEN`, and proxy settings may pass to child processes;
 they are not saved in reports.
 
 The sandbox denies the following attempts, and setup and the offline sample
-still pass. `scripts/pgvideo audit` shows that nothing else is attempted on
-macOS 27.0 (arm64); see [Isolation audit](#isolation-audit).
+still pass. They were observed once with `strace` on Ubuntu 26.04 (Linux 7.0,
+x86_64) during `setup --offline` and `doctor --sample`:
 
-- PyTorch's bundled OpenMP runtime lists `/private/tmp` and tries to create
-  `/private/tmp/__KMP_REGISTERED_LIB_<pid>`; `/tmp` is hard-coded, and denial
-  makes it fall back to an environment variable.
-- Through macOS frameworks, Chromium lists `/private/etc` and reads
-  `/private/etc/hosts`, `/Library/Preferences/com.apple.networkd.plist`,
-  `/private/var/db/mds`, `~/Library/Keyboard Layouts`,
-  `~/Library/Input Methods`, and `~/Library/Autosave Information`.
-- Starting `/bin/sh` or another allowed shell, as `scripts/espeak-ng-runtime`
-  does, lists `/bin` and reads the shell binaries.
+- pip lists `/etc` and runs `lsb_release` and `uname` to describe the host.
+- Python's `ctypes.util.find_library` runs `ldconfig`, `gcc`, and `ld`; joblib
+  tries to create a semaphore in `/dev/shm`; urllib3 creates an IPv6 socket
+  when it is imported; and importing PyTorch reads `/etc/nsswitch.conf` and
+  `/etc/passwd`.
+- Chromium reads `/etc/hosts`, `/etc/host.conf`, `/etc/nsswitch.conf`,
+  `/etc/resolv.conf`, `/usr/share/mime/mime.cache`, and
+  `/usr/share/fontconfig/conf.avail`; lists `/dev/dri` and the Vulkan
+  configuration under `/etc/vulkan` and `/usr/share/vulkan`; writes
+  `/proc/<pid>/oom_score_adj` for its renderers; and creates IPv4 and IPv6 UDP
+  sockets.
+- Playwright's Node.js driver reads `/etc/resolv.conf` and the memory limits
+  under `/sys/fs/cgroup`, and calls `io_uring_setup`.
+
+No command repeats that observation. Landlock denies an access with an error
+and cannot terminate the process, and the kernel records denied attempts only
+in its audit log (Linux 6.15 or newer), which needs administrator rights. The
+macOS version of this project had a kill-on-access `audit` command; Linux has
+no unprivileged equivalent, so the command was removed.
 
 The Python archive download, extraction, and `.venv/` creation in
 `scripts/setup` run before the sandbox applies, using `/bin/sh`, `/bin/mkdir`,
-`/usr/bin/uname`, `/usr/bin/curl`, `/usr/bin/shasum`, `/usr/bin/tar`, and
-`/usr/bin/env` by absolute path. `sandbox-exec` is deprecated by Apple; if it
-disappears, commands fail rather than run unconfined.
+`/usr/bin/uname`, `/usr/bin/curl`, `/usr/bin/sha256sum`, `/usr/bin/tar`, and
+`/usr/bin/env` by absolute path.
 
 ### Requests
 
@@ -1064,26 +1111,6 @@ narration units still come from the unit cache when their TTS text and
 provenance match. `--no-reuse` builds a fresh video, which is registered in
 turn.
 
-### Isolation audit
-
-`scripts/pgvideo audit` repeats `setup --offline` and the offline sample
-(Kokoro synthesis, a Chromium slide, and an FFmpeg encode and decode) under a
-Seatbelt profile that terminates any process that reads file contents, writes,
-or runs a program outside the project and the operating system paths listed
-under [Containment](#containment), or opens an IP connection. Seatbelt does not
-log denials on this host, so this is how an undocumented access shows: the
-audit stops, and its error names the step. Only the attempts listed under
-Containment, and doctor's own denial probes, are denied without terminating.
-The audit passed on macOS 27.0 (arm64), which also shows that synthesis,
-rendering, and encoding make no network connections.
-
-The result is saved as `isolation.audit` in `.runtime/environment-report.json`
-and copied into each request's manifest. It stays valid until the locks or the
-environment scripts change. The audit does not cover metadata lookups, Mach
-IPC, the bootstrap in `scripts/setup`, or the network retrieval in `setup` and
-`prepare`. If an audit fails during setup, run `scripts/setup --offline` to
-restore the environment.
-
 ### Tests
 
 ```sh
@@ -1094,11 +1121,12 @@ The suite runs inside the offline sandbox in about two minutes. Tests mock GitHu
 access and create their temporary fixtures under `.runtime/tmp/`, including the
 directories used to simulate escaping paths.
 
-- **Environment:** the sandbox probes; the audit profile's rule order; hostile
-  inherited settings, including temporary, cache, model, browser, and eSpeak NG
-  paths outside the project; tools on `PATH`, and no tools on `PATH` at all; a
-  missing project-local ffprobe with a decoy on `PATH`; Mach-O dependency
-  resolution; archive extraction; and the bootstrap pins in `scripts/setup`.
+- **Environment:** the sandbox probes, including UDP sockets; the sandbox
+  profile and the seccomp filter's verdicts; hostile inherited settings,
+  including temporary, cache, model, browser, font, and eSpeak NG paths outside
+  the project; tools on `PATH`, and no tools on `PATH` at all; a missing
+  project-local ffprobe with a decoy on `PATH`; ELF dependency resolution;
+  archive extraction; and the bootstrap pins in `scripts/setup`.
 - **Focused checks with small fixtures:** `tests/fixtures/` holds a small wiki,
   with a glossary and one page per case under `wiki/v18/checks/`, and the pinned
   PostgreSQL files that the pages cite. `test_checks.py` runs each page through

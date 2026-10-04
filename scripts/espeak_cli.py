@@ -17,7 +17,7 @@ def main() -> None:
     parser.add_argument("--language", default="en-us")
     parser.add_argument("text", nargs="+")
     args = parser.parse_args()
-    EspeakWrapper.set_library(str(ROOT / ".runtime/lib/libespeak-ng.dylib"))
+    EspeakWrapper.set_library(str(ROOT / ".runtime/lib/libespeak-ng.so"))
     EspeakWrapper.set_data_path(str(ROOT / ".runtime/share/espeak-ng-data"))
     print(phonemize(" ".join(args.text), language=args.language, backend="espeak", strip=True))
 

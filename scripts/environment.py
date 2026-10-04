@@ -2,19 +2,20 @@
 
 This file uses only the standard library so it can validate paths before
 loading any project dependency. It must be run by the project's .venv Python.
-Every command re-executes itself under a macOS Seatbelt profile that confines
-file access to the project and a documented set of operating system paths.
+Every command confines itself with Landlock and, when offline, a seccomp
+filter, then re-executes; file access is limited to the project and a
+documented set of operating system paths.
 """
 
 from __future__ import annotations
 
 import ctypes
+import errno
 import hashlib
 import importlib.metadata
 import json
 import os
 import platform
-import pwd
 import re
 import shutil
 import socket
@@ -36,8 +37,6 @@ SITE = VENV / "lib" / "python3.11" / "site-packages"
 CA_BUNDLE = SITE / "certifi" / "cacert.pem"
 LOCK = ROOT / "tools.lock"
 REPORT = ROOT / ".runtime" / "environment-report.json"
-SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
-LIBSYSTEM = "/usr/lib/libSystem.B.dylib"
 
 DIRECTORIES = (
     ".runtime/python", ".runtime/bin", ".runtime/lib", ".runtime/share",
@@ -55,63 +54,83 @@ PASSTHROUGH = ("GITHUB_TOKEN", "HF_TOKEN", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROX
 # Model inference is the external harness's job; no pgvideo command calls a model or carries its credentials.
 NETWORK_COMMANDS = {"setup", "prepare"}
 # Operating system locations a sandboxed command may use besides the project.
-# Seatbelt matches canonical paths, so /etc and /tmp appear as /private/...
+# Landlock attaches a rule to the file or directory a path resolves to, so /lib, /lib64, and /bin
+# are covered where they are links into /usr. Paths a host lacks are skipped.
 OS_READS = (
-    ('(literal "/")', "the root directory listing"),
-    ('(require-all (subpath "/System") (require-not (subpath "/System/Volumes/Data")))',
-     "/System frameworks and the dyld shared cache, excluding the data volume"),
-    ('(subpath "/usr/lib")', "/usr/lib system libraries"),
-    ('(subpath "/usr/share/zoneinfo")', "/usr/share/zoneinfo time zone data"),
-    ('(subpath "/usr/share/icu")', "/usr/share/icu Unicode data"),
-    ('(subpath "/usr/share/locale")', "/usr/share/locale locale data"),
-    ('(subpath "/private/var/db/timezone")', "/private/var/db/timezone time zone data"),
-    ('(subpath "/dev")', "/dev devices"),
+    ("/usr/lib", "/usr/lib system libraries, the dynamic loader, and the locale archive"),
+    ("/usr/lib64", "/usr/lib64 system libraries"),
+    ("/lib", "/lib system libraries"),
+    ("/lib64", "/lib64 system libraries"),
+    ("/etc/ld.so.cache", "/etc/ld.so.cache, the dynamic loader's library index"),
+    ("/usr/share/zoneinfo", "/usr/share/zoneinfo time zone data"),
+    # pip names the distribution in its user agent and fails if this file exists but cannot be read.
+    ("/etc/debian_version", "/etc/debian_version"),
+    ("/proc", "/proc process and kernel information"),
+    # Chromium's GPU process exits unless it can list the PCI devices, whose entries link into /sys/devices.
+    ("/sys/devices", "/sys/devices hardware description, including processor topology"),
+    ("/sys/bus/pci/devices", "/sys/bus/pci/devices, the list of PCI devices"),
+    ("/dev/null", "/dev/null"),
+    ("/dev/zero", "/dev/zero"),
+    ("/dev/random", "/dev/random"),
+    ("/dev/urandom", "/dev/urandom"),
+    ("/dev/tty", "/dev/tty"),
+    ("/dev/pts", "/dev/pts terminals"),
+)
+# Name resolution for the commands that download. Offline commands cannot read these.
+NETWORK_READS = (
+    ("/etc/resolv.conf", "/etc/resolv.conf"),
+    ("/run/systemd/resolve", "/run/systemd/resolve, where /etc/resolv.conf points under systemd-resolved"),
+    ("/etc/hosts", "/etc/hosts"),
+    ("/etc/nsswitch.conf", "/etc/nsswitch.conf"),
+    ("/etc/host.conf", "/etc/host.conf"),
+    ("/etc/gai.conf", "/etc/gai.conf"),
 )
 OS_WRITES = (
-    ('(literal "/dev/null")', "/dev/null"),
-    ('(literal "/dev/dtracehelper")', "/dev/dtracehelper"),
-    ('(regex #"^/dev/tty")', "/dev/tty* terminals"),
-    ('(regex #"^/dev/fd/")', "/dev/fd/* inherited descriptors"),
+    ("/dev/null", "/dev/null"),
+    ("/dev/tty", "/dev/tty"),
+    ("/dev/pts", "/dev/pts terminals"),
 )
-# /bin/sh runs the shell selected by /private/var/select/sh.
-OS_EXECUTABLES = ("/bin/sh", "/bin/bash", "/bin/dash", "/bin/zsh")
-# Attempts outside the project that kill-on-access audits of setup --offline and the offline sample
-# found on macOS 27.0 (arm64). The project sandbox denies each one, and setup and the sample pass
-# without them. The audit profile denies them without terminating the process.
-AUDIT_KNOWN_READS = (
-    ('(literal "/private/etc")', "the /private/etc directory listing (Chromium, through macOS frameworks)"),
-    ('(literal "/private/etc/hosts")', "/private/etc/hosts (Chromium, and doctor's read probe)"),
-    ('(literal "/Library/Preferences/com.apple.networkd.plist")',
-     "/Library/Preferences/com.apple.networkd.plist (Chromium)"),
-    ('(subpath "/private/var/db/mds")', "/private/var/db/mds (Chromium)"),
-    ('(subpath (string-append (param "USER_HOME") "/Library/Keyboard Layouts"))',
-     "~/Library/Keyboard Layouts (Chromium)"),
-    ('(subpath (string-append (param "USER_HOME") "/Library/Input Methods"))', "~/Library/Input Methods (Chromium)"),
-    ('(subpath (string-append (param "USER_HOME") "/Library/Autosave Information"))',
-     "~/Library/Autosave Information (Chromium)"),
-    ('(literal "/private/tmp")', "the /private/tmp directory listing (PyTorch's bundled OpenMP runtime)"),
-    ('(literal "/bin") ' + " ".join(f'(literal "{path}")' for path in OS_EXECUTABLES),
-     "the /bin directory listing and the contents of " + ", ".join(OS_EXECUTABLES) + " (read whenever one of "
-     "these shells starts, such as for scripts/espeak-ng-runtime)"),
-)
-AUDIT_KNOWN_WRITES = (
-    ('(regex #"^/private/tmp/__KMP_REGISTERED_LIB_")',
-     "/private/tmp/__KMP_REGISTERED_LIB_<pid> (PyTorch's bundled OpenMP runtime)"),
-    ('(regex #"^/private/tmp/pgvideo-sandbox-probe-")', "/private/tmp/pgvideo-sandbox-probe-<pid> (doctor's write probe)"),
-)
-AUDIT_KNOWN_EXECUTABLES = (('(literal "/usr/bin/true")', "/usr/bin/true (doctor's execution probe)"),)
+# /bin/sh runs the launcher scripts. The kernel starts every dynamically linked program, including
+# the project's Python, through the dynamic loader.
+OS_EXECUTABLES = ("/bin/sh", "/bin/bash", "/bin/dash", "/lib64/ld-linux-x86-64.so.2")
 BOOTSTRAP_TOOLS = ("/bin/sh", "/bin/mkdir", "/usr/bin/uname", "/usr/bin/curl",
-                   "/usr/bin/shasum", "/usr/bin/tar", "/usr/bin/env")
+                   "/usr/bin/sha256sum", "/usr/bin/tar", "/usr/bin/env")
+# A file every Linux host lets any user read; the project sandbox denies it.
+SANDBOX_CANARY = "/etc/passwd"
 
-LC_REQ_DYLD = 0x80000000
-DYLIB_COMMANDS = {0xC: False, 0x18 | LC_REQ_DYLD: True, 0x1F | LC_REQ_DYLD: False,
-                  0x20: False, 0x23 | LC_REQ_DYLD: False}  # command -> weak link
-LC_RPATH = 0x1C | LC_REQ_DYLD
-MH_MAGIC_64 = 0xFEEDFACF
-MH_EXECUTE = 2
-FAT_MAGICS = {0xCAFEBABE: ">iiIII", 0xCAFEBABF: ">iiQQII"}
-CPU_TYPE_ARM64 = 0x0100000C
-OS_LIBRARY_PREFIXES = ("/System/Library/", "/usr/lib/")
+# glibc has no wrappers for Landlock, so the rules are installed through syscall(2).
+SYS_LANDLOCK_CREATE_RULESET, SYS_LANDLOCK_ADD_RULE, SYS_LANDLOCK_RESTRICT_SELF = 444, 445, 446
+LANDLOCK_CREATE_RULESET_VERSION = 1
+LANDLOCK_RULE_PATH_BENEATH = 1
+LANDLOCK_MINIMUM_ABI = 4  # Linux 6.7, the first with TCP rules. The filesystem rights below need ABI 3.
+LANDLOCK_FS = {name: 1 << bit for bit, name in enumerate((
+    "execute", "write_file", "read_file", "read_dir", "remove_dir", "remove_file", "make_char", "make_dir",
+    "make_reg", "make_sock", "make_fifo", "make_block", "make_sym", "refer", "truncate"))}
+LANDLOCK_FILE_RIGHTS = ("execute", "write_file", "read_file", "truncate")  # the rights a rule on a file may grant
+LANDLOCK_NET_TCP = 0b11  # bind and connect
+ACCESS = {
+    "read": ("read_file", "read_dir"),
+    "write": ("write_file", "truncate"),
+    "create": ("remove_dir", "remove_file", "make_char", "make_dir", "make_reg", "make_sock", "make_fifo",
+               "make_block", "make_sym", "refer"),
+    "execute": ("execute",),
+}
+PR_SET_SECCOMP, PR_SET_NO_NEW_PRIVS, PR_GET_NO_NEW_PRIVS = 22, 38, 39
+SECCOMP_MODE_FILTER = 2
+SECCOMP_RET_KILL_PROCESS, SECCOMP_RET_ERRNO, SECCOMP_RET_ALLOW = 0x80000000, 0x00050000, 0x7FFF0000
+AUDIT_ARCH_X86_64 = 0xC000003E
+X32_SYSCALL_BIT = 0x40000000
+SYS_SOCKET, SYS_IO_URING_SETUP = 41, 425
+
+ELF_MAGIC = b"\x7fELF"
+ELF_64_BIT_LITTLE_ENDIAN = b"\x02\x01"
+EM_X86_64 = 62
+PT_LOAD, PT_DYNAMIC, PT_INTERP = 1, 2, 3
+DT_NEEDED, DT_STRTAB, DT_RPATH, DT_RUNPATH = 1, 5, 15, 29
+# Where the dynamic loader finds a library that no search path of the binary provides.
+OS_LIBRARY_DIRECTORIES = ("/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/lib64", "/usr/lib64",
+                          "/lib", "/usr/lib")
+OS_LIBRARY_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/")
 
 
 class EnvironmentError(RuntimeError):
@@ -146,14 +165,10 @@ def controlled_environment() -> dict[str, str]:
         "TMPDIR": f"{root}/.runtime/tmp",
         "TMP": f"{root}/.runtime/tmp",
         "TEMP": f"{root}/.runtime/tmp",
-        # Chromium ignores TMPDIR on macOS and uses the per-user /var/folders directory.
-        "MAC_CHROMIUM_TMPDIR": f"{root}/.runtime/tmp",
         "TZ": "UTC",
-        # CoreFoundation otherwise reads ~/.CFUserTextEncoding from the real home directory.
-        "__CF_USER_TEXT_ENCODING": f"0x{os.getuid():X}:0x0:0x0",
         "SSL_CERT_FILE": str(CA_BUNDLE),
         "SSL_CERT_DIR": str(CA_BUNDLE.parent),
-        # Keep OpenSSL from loading the host's /private/etc/ssl/openssl.cnf.
+        # Keep OpenSSL from loading the host's /etc/ssl/openssl.cnf.
         "OPENSSL_CONF": os.devnull,
         "VIRTUAL_ENV": f"{root}/.venv",
         "PYTHONNOUSERSITE": "1",
@@ -171,7 +186,9 @@ def controlled_environment() -> dict[str, str]:
         "TORCH_HOME": f"{root}/cache/torch",
         "PLAYWRIGHT_BROWSERS_PATH": f"{root}/.runtime/browsers",
         "PLAYWRIGHT_SKIP_BROWSER_GC": "1",
-        "PHONEMIZER_ESPEAK_LIBRARY": f"{root}/.runtime/lib/libespeak-ng.dylib",
+        # Chromium loads no font without a Fontconfig configuration; this one lists only the bundled fonts.
+        "FONTCONFIG_FILE": f"{root}/assets/fonts/fonts.conf",
+        "PHONEMIZER_ESPEAK_LIBRARY": f"{root}/.runtime/lib/libespeak-ng.so",
         "PHONEMIZER_ESPEAK_DATA_PATH": f"{root}/.runtime/share/espeak-ng-data",
         "ESPEAK_DATA_PATH": f"{root}/.runtime/share/espeak-ng-data",
         "MPLCONFIGDIR": f"{root}/cache/matplotlib",
@@ -195,56 +212,110 @@ def child_environment() -> dict[str, str]:
     return controlled_environment() | {"PGVIDEO_SANDBOX": os.environ.get("PGVIDEO_SANDBOX", "")}
 
 
-def seatbelt_profile(*, network: bool) -> str:
-    """Return the Seatbelt policy applied to every command in this project."""
-    project = '(subpath (param "PROJECT_ROOT"))'
-    executables = " ".join(f'(literal "{path}")' for path in OS_EXECUTABLES)
-    rules = [
-        "(version 1)",
-        "(allow default)",
-        f"(deny file-read-data (require-not (require-any {project} {' '.join(rule for rule, _ in OS_READS)})))",
-        f"(deny file-write* (require-not (require-any {project} {' '.join(rule for rule, _ in OS_WRITES)})))",
-        f"(deny process-exec* (require-not (require-any {project} {executables})))",
-    ]
-    if not network:
-        rules.append("(deny network-outbound (remote ip))")
-    return "\n".join(rules) + "\n"
+def sandbox_profile(*, network: bool) -> dict:
+    """Return the Landlock and seccomp policy applied to every command in this project."""
+    reads = (*OS_READS, *NETWORK_READS) if network else OS_READS
+    rules = [{"path": str(ROOT), "access": ["read", "write", "create", "execute"]}]
+    rules += [{"path": path, "access": ["read"]} for path, _ in reads]
+    rules += [{"path": path, "access": ["write"]} for path, _ in OS_WRITES]
+    # The kernel opens a program for reading in order to run it, so execution needs both rights.
+    rules += [{"path": path, "access": ["read", "execute"]} for path in OS_EXECUTABLES]
+    return {
+        "landlock": {"handled_access": sorted(LANDLOCK_FS), "rules": rules,
+                     "tcp_bind_and_connect": "allowed" if network else "denied"},
+        "seccomp": None if network else {"socket_families_denied": ["AF_INET", "AF_INET6"],
+                                         "system_calls_denied": ["io_uring_setup"]},
+    }
 
 
-def audit_profile() -> str:
-    """Return the audit policy: any access outside the project and the OS paths terminates the process.
+def seccomp_filter() -> bytes:
+    """Return the BPF program that keeps an offline command from creating IPv4 or IPv6 sockets."""
+    load, equal, at_least, result = 0x20, 0x15, 0x35, 0x06
+    program = (
+        (load, 0, 0, 4),  # the architecture of the system call
+        (equal, 1, 0, AUDIT_ARCH_X86_64),
+        (result, 0, 0, SECCOMP_RET_KILL_PROCESS),  # 32-bit entry points number their system calls differently
+        (load, 0, 0, 0),  # the system call number
+        (at_least, 0, 1, X32_SYSCALL_BIT),
+        (result, 0, 0, SECCOMP_RET_ERRNO | errno.ENOSYS),
+        (equal, 0, 1, SYS_IO_URING_SETUP),  # io_uring can create a socket without calling socket
+        (result, 0, 0, SECCOMP_RET_ERRNO | errno.ENOSYS),
+        (equal, 1, 0, SYS_SOCKET),
+        (result, 0, 0, SECCOMP_RET_ALLOW),
+        (load, 0, 0, 16),  # the address family, socket's first argument
+        (equal, 1, 0, socket.AF_INET),
+        (equal, 0, 1, socket.AF_INET6),
+        (result, 0, 0, SECCOMP_RET_ERRNO | errno.EACCES),
+        (result, 0, 0, SECCOMP_RET_ALLOW),
+    )
+    return b"".join(struct.pack("HBBI", *instruction) for instruction in program)
 
-    Seatbelt applies the last matching rule, so the documented attempts listed after each kill
-    rule are denied without terminating the process, as the project sandbox denies them.
-    """
-    project = '(subpath (param "PROJECT_ROOT"))'
-    executables = " ".join(f'(literal "{path}")' for path in OS_EXECUTABLES)
-    rules = ["(version 1)", "(allow default)"]
-    for operation, allowed, known in (
-            ("file-read-data", " ".join(rule for rule, _ in OS_READS), AUDIT_KNOWN_READS),
-            ("file-write*", " ".join(rule for rule, _ in OS_WRITES), AUDIT_KNOWN_WRITES),
-            ("process-exec*", executables, AUDIT_KNOWN_EXECUTABLES)):
-        outside = f"(require-not (require-any {project} {allowed}))"
-        rules.append(f"(deny {operation} {outside} (with send-signal SIGKILL))")
-        rules.append(f"(deny {operation} (require-all {outside} (require-any {' '.join(rule for rule, _ in known)})))")
-    rules.append("(deny network-outbound (remote ip) (with send-signal SIGKILL))")
-    # Doctor's network probe connects to port 9 of a TEST-NET address; Seatbelt names hosts only as * or localhost.
-    rules.append('(deny network-outbound (remote ip "*:9"))')
-    return "\n".join(rules) + "\n"
+
+def apply_sandbox(profile: dict) -> None:
+    """Confine this process, and every program it starts, to the profile. This cannot be undone."""
+    if platform.machine() != "x86_64":
+        raise EnvironmentError("the project sandbox supports Linux x86_64 only")
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    word = ctypes.c_long
+
+    def failed(action: str) -> EnvironmentError:
+        return EnvironmentError(f"cannot {action}: {os.strerror(ctypes.get_errno())}; "
+                                "project containment cannot be enforced")
+
+    abi = libc.syscall(word(SYS_LANDLOCK_CREATE_RULESET), None, word(0), word(LANDLOCK_CREATE_RULESET_VERSION))
+    if abi < LANDLOCK_MINIMUM_ABI:
+        raise EnvironmentError(f"this kernel does not provide Landlock ABI {LANDLOCK_MINIMUM_ABI} (Linux 6.7 or "
+                               "newer with the landlock security module enabled); project containment cannot "
+                               "be enforced")
+    landlock = profile["landlock"]
+    handled = struct.pack("QQ", sum(LANDLOCK_FS[right] for right in landlock["handled_access"]),
+                          0 if landlock["tcp_bind_and_connect"] == "allowed" else LANDLOCK_NET_TCP)
+    ruleset = libc.syscall(word(SYS_LANDLOCK_CREATE_RULESET), handled, word(len(handled)), word(0))
+    if ruleset < 0:
+        raise failed("create the Landlock ruleset")
+    try:
+        for rule in landlock["rules"]:
+            try:
+                descriptor = os.open(rule["path"], os.O_PATH | os.O_CLOEXEC)
+            except FileNotFoundError:
+                continue
+            try:
+                rights = {right for name in rule["access"] for right in ACCESS[name]}
+                if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                    rights &= set(LANDLOCK_FILE_RIGHTS)
+                allowed = struct.pack("=Qi", sum(LANDLOCK_FS[right] for right in rights), descriptor)
+                if libc.syscall(word(SYS_LANDLOCK_ADD_RULE), word(ruleset), word(LANDLOCK_RULE_PATH_BENEATH),
+                                allowed, word(0)):
+                    raise failed(f"add the Landlock rule for {rule['path']}")
+            finally:
+                os.close(descriptor)
+        # Required before an unprivileged process may restrict itself; it also disables setuid programs.
+        if libc.prctl(word(PR_SET_NO_NEW_PRIVS), word(1), word(0), word(0), word(0)):
+            raise failed("set no_new_privs")
+        if libc.syscall(word(SYS_LANDLOCK_RESTRICT_SELF), word(ruleset), word(0)):
+            raise failed("apply the Landlock ruleset")
+    finally:
+        os.close(ruleset)
+    if profile["seccomp"]:
+        instructions = seccomp_filter()
+        buffer = ctypes.create_string_buffer(instructions, len(instructions))
+        program = struct.pack("HP", len(instructions) // 8, ctypes.addressof(buffer))
+        if libc.prctl(word(PR_SET_SECCOMP), word(SECCOMP_MODE_FILTER), program, word(0), word(0)):
+            raise failed("install the seccomp filter")
 
 
 def sandboxed() -> bool:
-    """Return whether macOS Seatbelt already confines this process."""
+    """Return whether this process already runs without new privileges and without access to host files."""
+    if ctypes.CDLL(None).prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) != 1:
+        return False
     try:
-        check = ctypes.CDLL(LIBSYSTEM).sandbox_check
-    except (OSError, AttributeError) as error:
-        raise EnvironmentError(f"cannot query the macOS sandbox state: {error}") from error
-    check.restype = ctypes.c_int
-    check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
-    result = check(os.getpid(), None, 0)
-    if result not in (0, 1):
-        raise EnvironmentError("cannot determine whether the macOS sandbox is active")
-    return result == 1
+        with open(SANDBOX_CANARY, "rb"):
+            return False
+    except PermissionError:
+        return True
+    except OSError as error:
+        raise EnvironmentError(f"cannot determine whether the project sandbox is active: {error}") from error
 
 
 def restart_clean(command: str) -> None:
@@ -252,26 +323,17 @@ def restart_clean(command: str) -> None:
     if os.environ.get("PGVIDEO_ENV_READY") != "1":
         arguments = [str(PYTHON), "-I", str(Path(__file__).resolve()), *sys.argv[1:]]
         if sandboxed():
-            # macOS refuses to apply a different profile inside a sandbox, so a command
-            # started by a sandboxed parent (the test suite) keeps that policy. Doctor
-            # probes it before any command runs.
+            # Another layer could only narrow the sandbox, so a command started by a
+            # sandboxed parent (the test suite) keeps that policy. Doctor probes it
+            # before any command runs.
             expected["PGVIDEO_SANDBOX"] = "inherited"
             os.execve(str(PYTHON), arguments, expected)
-        if not SANDBOX_EXEC.is_file():
-            raise EnvironmentError(f"{SANDBOX_EXEC} is missing; project containment cannot be enforced")
-        parameters = []
-        if command == "audit":
-            policy, profile = "audit", audit_profile()
-            # Chromium reaches ~/Library through macOS frameworks, which use the account's real home.
-            parameters = ["-D", f"USER_HOME={pwd.getpwuid(os.getuid()).pw_dir}"]
-        else:
-            policy = "network" if command in NETWORK_COMMANDS and "--offline" not in sys.argv[2:] else "offline"
-            profile = seatbelt_profile(network=policy == "network")
+        policy = "network" if command in NETWORK_COMMANDS and "--offline" not in sys.argv[2:] else "offline"
+        apply_sandbox(sandbox_profile(network=policy == "network"))
         expected["PGVIDEO_SANDBOX"] = policy
-        os.execve(str(SANDBOX_EXEC), [str(SANDBOX_EXEC), "-D", f"PROJECT_ROOT={ROOT}", *parameters, "-p", profile,
-                                      *arguments], expected)
+        os.execve(str(PYTHON), arguments, expected)
     expected["PGVIDEO_SANDBOX"] = os.environ.get("PGVIDEO_SANDBOX", "")
-    if expected["PGVIDEO_SANDBOX"] not in {"network", "offline", "audit", "inherited"} or not sandboxed():
+    if expected["PGVIDEO_SANDBOX"] not in {"network", "offline", "inherited"} or not sandboxed():
         raise EnvironmentError("the project sandbox is not active; run through scripts/pgvideo")
     extras = set(os.environ) - set(expected) - {"LC_CTYPE"}
     mismatches = [key for key, value in expected.items() if os.environ.get(key) != value]
@@ -284,19 +346,19 @@ def sandbox_probes(policy: str) -> dict[str, str]:
     results = {}
     advice = "; run scripts/pgvideo outside other sandboxes" if policy == "inherited" else ""
     sandbox = f"the {policy} sandbox"
-    probe = Path("/private/tmp") / f"pgvideo-sandbox-probe-{os.getpid()}"
+    probe = Path("/tmp") / f"pgvideo-sandbox-probe-{os.getpid()}"
     try:
         descriptor = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except PermissionError:
-        results["write /private/tmp"] = "denied"
+        results["write /tmp"] = "denied"
     else:
         os.close(descriptor)
         probe.unlink()
         raise EnvironmentError(f"{sandbox} allowed a write outside the project{advice}")
     try:
-        Path("/private/etc/hosts").read_bytes()
+        Path(SANDBOX_CANARY).read_bytes()
     except PermissionError:
-        results["read /private/etc/hosts"] = "denied"
+        results[f"read {SANDBOX_CANARY}"] = "denied"
     else:
         raise EnvironmentError(f"{sandbox} allowed reading a file outside the project{advice}")
     try:
@@ -312,8 +374,8 @@ def sandbox_probes(policy: str) -> dict[str, str]:
         except PermissionError:
             results["connect 192.0.2.1:9"] = "denied"
         except OSError:
-            if policy in ("offline", "audit"):
-                raise EnvironmentError(f"the {policy} sandbox did not deny outbound network access")
+            if policy == "offline":
+                raise EnvironmentError("the offline sandbox did not deny outbound network access")
             results["connect 192.0.2.1:9"] = "not denied by the inherited sandbox"
     return results
 
@@ -366,9 +428,14 @@ def validate_python(lock: dict) -> None:
     if Path(sys.prefix).resolve() != VENV or Path(sys.base_prefix).resolve() != local_path(".runtime/python"):
         raise EnvironmentError(".venv is not backed by the project's Python runtime; recreate it with scripts/setup")
     if platform.system() != lock["platform"]["system"] or platform.machine() != lock["platform"]["architecture"]:
-        raise EnvironmentError("this tools.lock supports macOS arm64 only")
-    if int(platform.mac_ver()[0].split(".")[0]) < int(lock["platform"]["minimum_macos"].split(".")[0]):
-        raise EnvironmentError("macOS is older than the pinned wheel and browser requirements")
+        raise EnvironmentError("this tools.lock supports Linux x86_64 only")
+    try:
+        library, version = os.confstr("CS_GNU_LIBC_VERSION").split()
+    except (AttributeError, OSError, ValueError) as error:
+        raise EnvironmentError("the pinned wheels and Python runtime need glibc") from error
+    minimum = lock["platform"]["minimum_glibc"]
+    if library != "glibc" or [int(part) for part in version.split(".")] < [int(part) for part in minimum.split(".")]:
+        raise EnvironmentError(f"glibc is older than {minimum}, which the pinned wheels require")
     if platform.python_version() != lock["python"]["version"]:
         raise EnvironmentError("local Python version differs from tools.lock")
     config = (VENV / "pyvenv.cfg").read_text(encoding="utf-8")
@@ -483,7 +550,7 @@ def install_espeak(lock: dict) -> None:
     site = SITE / "espeakng_loader"
     if not site.is_dir():
         raise EnvironmentError("espeakng-loader is missing from the local environment")
-    for source in site.glob("libespeak-ng*.dylib"):
+    for source in site.glob("libespeak-ng.so*"):
         shutil.copy2(source, local_path(".runtime/lib") / source.name)
     shutil.copytree(site / "espeak-ng-data", local_path(record["data"]), dirs_exist_ok=True)
     executable = local_path(".runtime/bin/espeak-ng")
@@ -562,49 +629,55 @@ def install_ca_bundle(*, offline: bool) -> None:
         Path(requirement).unlink(missing_ok=True)
 
 
-def macho_load_commands(path: Path) -> tuple[int, list[tuple[str, bool]], list[str]] | None:
-    """Return the file type, linked libraries, and rpaths of an arm64 Mach-O file.
+def elf_dynamic(path: Path) -> tuple[list[str], list[str], str | None] | None:
+    """Return the needed libraries, library search paths, and program interpreter of an x86_64 ELF file.
 
-    Reading load commands directly keeps doctor independent of Xcode's otool.
-    Files that are not Mach-O return None.
+    Reading the dynamic section directly keeps doctor independent of binutils' readelf.
+    Files that are not ELF return None.
     """
     with path.open("rb") as stream:
-        header = stream.read(8)
-        if len(header) < 8:
+        header = stream.read(64)
+        if len(header) < 64 or header[:4] != ELF_MAGIC:
             return None
-        offset = 0
-        magic, count = struct.unpack(">II", header)
-        if magic in FAT_MAGICS:
-            if count >= 20:  # Java class files share the universal-binary magic number.
-                return None
-            entry = FAT_MAGICS[magic]
-            slices = [struct.unpack(entry, stream.read(struct.calcsize(entry))) for _ in range(count)]
-            offsets = [item[2] for item in slices if item[0] == CPU_TYPE_ARM64]
-            if not offsets:
-                raise EnvironmentError(f"universal binary has no arm64 code: {path}")
-            offset = offsets[0]
-        stream.seek(offset)
-        header = stream.read(32)
-        if len(header) < 32 or struct.unpack_from("<I", header)[0] != MH_MAGIC_64:
-            if offset:
-                raise EnvironmentError(f"invalid arm64 slice: {path}")
-            return None
-        _, cpu, _, file_type, command_count, commands_size, _, _ = struct.unpack("<IiiIIIII", header)
-        if cpu != CPU_TYPE_ARM64:
-            raise EnvironmentError(f"native binary is not arm64: {path}")
-        commands = stream.read(commands_size)
-    dependencies, rpaths, position = [], [], 0
-    for _ in range(command_count):
-        command, size = struct.unpack_from("<II", commands, position)
-        if command in DYLIB_COMMANDS or command == LC_RPATH:
-            (name_offset,) = struct.unpack_from("<I", commands, position + 8)
-            name = commands[position + name_offset:position + size].split(b"\0", 1)[0].decode("utf-8")
-            if command == LC_RPATH:
-                rpaths.append(name)
-            else:
-                dependencies.append((name, DYLIB_COMMANDS[command]))
-        position += size
-    return file_type, dependencies, rpaths
+        if header[4:6] != ELF_64_BIT_LITTLE_ENDIAN or struct.unpack_from("<H", header, 18)[0] != EM_X86_64:
+            raise EnvironmentError(f"native binary is not x86_64: {path}")
+        (table_offset,) = struct.unpack_from("<Q", header, 32)
+        entry_size, count = struct.unpack_from("<HH", header, 54)
+        stream.seek(table_offset)
+        table = stream.read(entry_size * count)
+        # Each program header starts with its type, flags, file offset, address, physical address, and file size.
+        segments = [struct.unpack_from("<IIQQQQ", table, index * entry_size) for index in range(count)]
+
+        def text_at(offset: int) -> str:
+            stream.seek(offset)
+            raw = b""
+            while b"\0" not in raw and (block := stream.read(256)):
+                raw += block
+            return raw.split(b"\0", 1)[0].decode("utf-8")
+
+        interpreter, entries = None, {}
+        for kind, _, offset, _, _, size in segments:
+            if kind == PT_INTERP:
+                interpreter = text_at(offset)
+            elif kind == PT_DYNAMIC:
+                stream.seek(offset)
+                dynamic = stream.read(size)
+                for position in range(0, len(dynamic) - 15, 16):
+                    tag, value = struct.unpack_from("<qQ", dynamic, position)
+                    if tag == 0:
+                        break
+                    entries.setdefault(tag, []).append(value)
+        if DT_STRTAB not in entries:
+            return [], [], interpreter  # statically linked
+        address = entries[DT_STRTAB][0]
+        strings = next((offset + address - start for kind, _, offset, start, _, size in segments
+                        if kind == PT_LOAD and start <= address < start + size), None)
+        if strings is None:
+            raise EnvironmentError(f"invalid dynamic section: {path}")
+        needed = [text_at(strings + value) for value in entries.get(DT_NEEDED, [])]
+        # The loader ignores DT_RPATH when the file has DT_RUNPATH.
+        paths = [text_at(strings + value) for value in entries.get(DT_RUNPATH) or entries.get(DT_RPATH, [])]
+    return needed, [item for value in paths for item in value.split(":") if item], interpreter
 
 
 def native_binaries(lock: dict):
@@ -615,61 +688,64 @@ def native_binaries(lock: dict):
                 path = Path(directory, name)
                 if path.is_symlink() or not path.is_file():
                     continue
-                if path.suffix in {".so", ".dylib"} or os.access(path, os.X_OK):
+                if ".so" in path.suffixes or os.access(path, os.X_OK):
                     yield path
 
 
-def resolve_dependency(binary: Path, file_type: int, name: str, weak: bool, search: list[Path]) -> None:
-    if name.startswith(OS_LIBRARY_PREFIXES):
-        return  # Served from the dyld shared cache.
-    if name.startswith("@rpath/"):
-        candidates = [directory / name.removeprefix("@rpath/") for directory in search]
-    elif name.startswith("@loader_path/"):
-        candidates = [binary.parent / name.removeprefix("@loader_path/")]
-    elif name.startswith("@executable_path/") and file_type == MH_EXECUTE:
-        candidates = [binary.parent / name.removeprefix("@executable_path/")]
-    elif name.startswith("/"):
-        candidates = [Path(name)]
+def os_library(path: Path) -> bool:
+    return str(path.resolve()).startswith(OS_LIBRARY_PREFIXES)
+
+
+def resolve_dependency(binary: Path, name: str, search: list[Path], bundled: frozenset[str]) -> None:
+    if "/" in name:
+        if not name.startswith("/"):
+            raise EnvironmentError(f"cannot resolve native dependency {name} of {binary}")
+        candidates = [Path(os.path.normpath(name))]
     else:
-        raise EnvironmentError(f"cannot resolve native dependency {name} of {binary}")
+        candidates = [directory / name for directory in search]
     for candidate in candidates:
         if candidate.exists():
-            if not candidate.resolve().is_relative_to(ROOT):
+            if not candidate.resolve().is_relative_to(ROOT) and not os_library(candidate):
                 raise EnvironmentError(f"native dependency escapes project: {binary}: {candidate}")
             return
-    if not weak:
-        raise EnvironmentError(f"native dependency is missing: {binary}: {name}")
+    if "/" not in name and any(Path(directory, name).exists() for directory in OS_LIBRARY_DIRECTORIES):
+        return  # A system library, which the loader finds without a search path.
+    if name in bundled:
+        # Only a library of the project can satisfy it: one the loading program has already
+        # loaded, as Python packages do for their extension modules, or none at all.
+        return
+    raise EnvironmentError(f"native dependency is missing: {binary}: {name}")
 
 
-def check_native_binary(binary: Path) -> list[str] | None:
-    """Resolve a binary's libraries the way dyld would and require them inside the project.
+def check_native_binary(binary: Path, bundled: frozenset[str] = frozenset()) -> list[str] | None:
+    """Resolve a binary's libraries the way the dynamic loader would and require them inside the project
+    or among the system libraries. bundled names the libraries the project ships anywhere.
 
-    Returns rpaths outside the project that no dependency uses, or None for non-Mach-O files.
+    Returns search paths outside the project, which provide none of its libraries, or None for non-ELF files.
     """
-    parsed = macho_load_commands(binary)
+    parsed = elf_dynamic(binary)
     if parsed is None:
         return None
-    file_type, dependencies, rpaths = parsed
-    search = []
-    for rpath in rpaths:
-        if rpath.startswith("@loader_path"):
-            search.append(binary.parent / rpath.removeprefix("@loader_path").lstrip("/"))
-        elif rpath.startswith("@executable_path"):
-            if file_type == MH_EXECUTE:
-                search.append(binary.parent / rpath.removeprefix("@executable_path").lstrip("/"))
-        else:
-            search.append(Path(rpath))
-    for name, weak in dependencies:
-        resolve_dependency(binary, file_type, name, weak, search)
-    if any(name.startswith("@rpath/") for name, _ in dependencies):
-        return []
-    return [str(directory) for directory in search if not directory.resolve(strict=False).is_relative_to(ROOT)]
+    needed, paths, interpreter = parsed
+    if interpreter is not None and interpreter not in OS_EXECUTABLES:
+        raise EnvironmentError(f"native binary needs a loader the sandbox does not run: {binary}: {interpreter}")
+    origin = str(binary.parent)
+    # The loader replaces $ORIGIN, in search paths and library names alike, with the binary's directory.
+    needed, paths = ([item.replace("${ORIGIN}", origin).replace("$ORIGIN", origin) for item in items]
+                     for items in (needed, paths))
+    search = [Path(os.path.normpath(item)) for item in paths]
+    for name in needed:
+        resolve_dependency(binary, name, search, bundled)
+    return [str(directory) for directory in dict.fromkeys(search)
+            if not directory.resolve(strict=False).is_relative_to(ROOT) and not os_library(directory)]
 
 
 def check_native_libraries(lock: dict) -> dict:
     checked, unused_rpaths = 0, {}
-    for binary in native_binaries(lock):
-        external = check_native_binary(binary)
+    binaries = list(native_binaries(lock))
+    bundled = frozenset(binary.name for binary in binaries)
+    for binary in binaries:
+        external = check_native_binary(binary, bundled)
         if external is None:
             continue
         checked += 1
@@ -681,16 +757,15 @@ def check_native_libraries(lock: dict) -> dict:
 def isolation_policy() -> dict:
     policy = os.environ.get("PGVIDEO_SANDBOX", "")
     return {
-        "enforcement": "macOS Seatbelt through /usr/bin/sandbox-exec",
+        "enforcement": "Linux Landlock and seccomp, applied by scripts/environment.py before each command",
         "policy": policy,
-        "network": {"network": "allowed", "offline": "IP connections denied",
-                    "audit": "IP connections terminate the process"}.get(policy, "inherited from parent"),
+        "network": {"network": "allowed", "offline": "IP sockets denied"}.get(policy, "inherited from parent"),
         "project_access": "read, write, and execute",
         "os_reads": [description for _, description in OS_READS],
+        "network_reads": [description for _, description in NETWORK_READS],
         "os_writes": [description for _, description in OS_WRITES],
         "os_executables": list(OS_EXECUTABLES),
-        "profile": (audit_profile() if policy == "audit" else
-                    seatbelt_profile(network=policy == "network") if policy in {"network", "offline"} else None),
+        "profile": sandbox_profile(network=policy == "network") if policy in {"network", "offline"} else None,
     }
 
 
@@ -713,67 +788,12 @@ def recorded_sample() -> dict:
     return {"status": "not run for this environment; run scripts/pgvideo doctor --sample"}
 
 
-def recorded_audit() -> dict:
-    """Keep the last audit result while the locks and scripts it covered are unchanged."""
-    try:
-        audit = json.loads(REPORT.read_text(encoding="utf-8"))["isolation"]["audit"]
-        if audit.get("fingerprint") == environment_fingerprint():
-            if audit.get("status") == "running" and os.environ.get("PGVIDEO_SANDBOX") != "audit":
-                return audit | {"status": "incomplete", "error": "the audit stopped before it finished; a process "
-                                "may have been terminated for an undocumented access. Run scripts/pgvideo audit "
-                                "again and watch which step it stops in."}
-            return audit
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    return {"status": "not run for this environment; run scripts/pgvideo audit"}
-
-
-def record_audit(result: dict) -> None:
-    try:
-        report = json.loads(REPORT.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        report = {"status": "not checked", "isolation": {}}
-    report.setdefault("isolation", {})["audit"] = result
-    REPORT.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-
-
-def audit(lock: dict) -> None:
-    """Repeat setup --offline and the offline sample under the kill-on-access audit profile.
-
-    Any read, write, or execution outside the project and the documented operating system
-    paths, and any IP connection, terminates the process that attempts it, so a passing
-    audit shows that nothing else is accessed. Only the documented attempts listed in
-    AUDIT_KNOWN_* are denied without terminating.
-    """
-    if os.environ.get("PGVIDEO_SANDBOX") != "audit":
-        raise EnvironmentError("audit must start from scripts/pgvideo outside other sandboxes")
-    record = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-              "fingerprint": environment_fingerprint(), "profile": audit_profile(),
-              "steps": ["setup --offline", "doctor --sample: Kokoro synthesis, Chromium slide, FFmpeg encode and "
-                        "decode"],
-              "terminates_on": ["reading file contents, writing, or executing outside the project and the "
-                                "operating system paths in os_requirements", "any outbound IP connection"],
-              "denied_without_termination": [description for _, description in
-                                             (*AUDIT_KNOWN_READS, *AUDIT_KNOWN_WRITES, *AUDIT_KNOWN_EXECUTABLES)]}
-    record_audit(record)
-    try:
-        print("Audit: setup --offline under the kill-on-access profile", flush=True)
-        setup(lock, offline=True)
-        print("Audit: doctor --sample (Kokoro synthesis, Chromium slide, FFmpeg encode and decode)", flush=True)
-        doctor(lock, sample=True, announce=False)
-    except (EnvironmentError, OSError, subprocess.CalledProcessError) as error:
-        record_audit(record | {"status": "failed", "error": str(error)})
-        raise
-    record_audit(record | {"status": "passed",
-                           "completed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")})
-    print(f"Audit passed: {REPORT}")
-
-
 def setup(lock: dict, *, offline: bool) -> None:
     wheelhouse = local_path("cache/wheels")
     install_sitecustomize()
     install_ca_bundle(offline=offline)
     download(lock["spacy_model"], "path", offline=offline)
+    download(lock["torch"], "path", offline=offline)
     if not offline and not wheelhouse_complete():
         run_local([str(PYTHON), "-I", "-m", "pip", "download", "--only-binary=:all:",
                    "--dest", str(wheelhouse), "--find-links", str(wheelhouse),
@@ -864,7 +884,6 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
         if sample:
             sample_result = {"status": "failed", "error": message}
     isolation["sample"] = sample_result
-    isolation["audit"] = recorded_audit()
     report = {
         "status": "passed" if not problems else "failed",
         "project_root": str(ROOT),
@@ -891,27 +910,31 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
         },
         "errors": problems,
         "os_requirements": [
-            "macOS kernel, dyld, and Seatbelt enforcement through /usr/bin/sandbox-exec",
+            f"Linux x86_64 with Landlock ABI {LANDLOCK_MINIMUM_ABI} (Linux 6.7 or newer), seccomp filters, and glibc "
+            f"{lock['platform']['minimum_glibc']} or newer",
             "reading " + ", ".join(description for _, description in OS_READS),
+            "reading, for setup and prepare only, " + ", ".join(description for _, description in NETWORK_READS),
             "writing " + ", ".join(description for _, description in OS_WRITES),
-            "running " + ", ".join(OS_EXECUTABLES) + " for the launcher scripts",
-            "system services reached over Mach IPC, such as DNS, proxy settings, and fonts",
-            "network access for setup and prepare: GitHub, PyPI, Hugging Face, the Playwright CDN, and the FFmpeg "
-            "build host",
+            "running " + ", ".join(OS_EXECUTABLES) + " for the launcher scripts and dynamically linked programs",
+            "the system libraries headless Chromium links to; checks.native_binaries fails when one is missing",
+            "system services reached over Unix-domain sockets, such as systemd-resolved for DNS",
+            "network access for setup and prepare: GitHub, PyPI, download.pytorch.org, Hugging Face, the Playwright "
+            "CDN, and the FFmpeg build host",
             "bootstrap before the sandbox starts: " + ", ".join(BOOTSTRAP_TOOLS),
             "the platform null device for PIP_CONFIG_FILE and OPENSSL_CONF",
         ],
         "isolation_limitations": [
-            "Seatbelt restricts reading file contents, but not metadata lookups such as stat of parent directories.",
-            "Mach IPC is not restricted; system services such as DNS, proxy configuration, and font services act for the process.",
-            "Seatbelt does not log denied attempts on this host. scripts/pgvideo audit repeats setup --offline and "
-            "the sample under a profile that terminates any process reading, writing, or executing outside the "
-            "project and the paths above, or opening an IP connection; only the attempts listed in "
-            "isolation.audit.denied_without_termination are denied without terminating.",
-            "The audit does not cover metadata lookups, Mach IPC, the bootstrap in scripts/setup, or the network "
-            "retrieval of setup and prepare.",
+            "Landlock restricts opening files and listing directories, but not metadata lookups such as stat of "
+            "parent directories.",
+            "/proc is readable, including the entries other processes leave readable to every user.",
+            "Unix-domain sockets, signals, and other local IPC are not restricted; system services such as "
+            "systemd-resolved and D-Bus act for the process.",
+            "Offline commands cannot create IPv4 or IPv6 sockets and cannot bind or connect TCP sockets; setup and "
+            "prepare may reach any host.",
+            "Landlock denies an access with an error and does not terminate the process, and only the kernel audit "
+            "log, which needs administrator rights, records denied attempts. No command audits them.",
             "scripts/setup downloads, verifies, and unpacks the Python runtime and creates .venv before the sandbox applies.",
-            "sandbox-exec is deprecated by Apple; if it is removed, commands fail instead of running unconfined.",
+            "A kernel without the required Landlock ABI makes commands fail instead of running unconfined.",
         ],
     }
     REPORT.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -926,7 +949,7 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
 
 def main() -> int:
     if not sys.argv[1:]:
-        raise EnvironmentError("use scripts/pgvideo doctor, test, audit, prepare --document ..., "
+        raise EnvironmentError("use scripts/pgvideo doctor, test, prepare --document ..., "
                                "status --request ..., or another command in AGENTS.md")
     create_directories()
     restart_clean(sys.argv[1])
@@ -942,11 +965,6 @@ def main() -> int:
         if sys.argv[2:] not in ([], ["--sample"]):
             raise EnvironmentError("doctor accepts only --sample")
         doctor(lock, sample="--sample" in sys.argv[2:])
-        return 0
-    if command == "audit":
-        if sys.argv[2:]:
-            raise EnvironmentError("audit accepts no arguments")
-        audit(lock)
         return 0
     if command == "test":
         if sys.argv[2:]:
