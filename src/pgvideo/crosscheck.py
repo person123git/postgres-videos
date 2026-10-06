@@ -49,7 +49,6 @@ WORST = ("conflict", "version_mismatch", "ambiguous", "not_in_glossary", "consis
 SEVERITIES = ("blocking", "warning", "note")
 CLAIM_STATUSES = ("verified", "supported", "cited", "unconfirmed", "uncited")
 RESOLUTIONS = "resolutions.yaml"
-MAX_RESOLUTIONS_BYTES = 1024 * 1024
 # Coverage decisions whose sections reach the narration or the screen.
 NARRATED = ("explain", "summarize")
 # Section roles whose sentences are claims; the question and open questions are not.
@@ -1859,8 +1858,6 @@ def _load_resolutions(run_dir: Path) -> dict | None:
     if not path.exists():
         return None
     data = path.read_bytes()
-    if len(data) > MAX_RESOLUTIONS_BYTES:
-        raise ValueError(f"{RESOLUTIONS} is larger than {MAX_RESOLUTIONS_BYTES} bytes.")
     try:
         loaded = yaml.load(data.decode("utf-8"), Loader=_FrontMatterLoader)
     except MarkdownError as error:

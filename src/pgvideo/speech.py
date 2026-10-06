@@ -19,7 +19,6 @@ import yaml
 from .markdown import MarkdownError, _FrontMatterLoader
 
 DICTIONARY = Path("pronunciation") / "en.yaml"
-MAX_DICTIONARY_BYTES = 256 * 1024
 SECTIONS = ("terms", "parts", "abbreviations", "units")
 
 CODE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
@@ -96,8 +95,6 @@ class Pronunciation:
         if path.is_symlink() or not path.is_file():
             raise PronunciationError(f"The pronunciation dictionary {DICTIONARY} is missing.")
         data = path.read_bytes()
-        if len(data) > MAX_DICTIONARY_BYTES:
-            raise PronunciationError(f"{DICTIONARY} is larger than {MAX_DICTIONARY_BYTES} bytes.")
         try:
             loaded = yaml.load(data.decode("utf-8"), Loader=_FrontMatterLoader)
         except MarkdownError as error:

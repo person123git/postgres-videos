@@ -20,13 +20,14 @@ from unittest.mock import patch
 
 from harness_fixture import accept_content, authored, recorded_content, recorded_review, write
 from pgvideo import cli
+from pgvideo.evidence import Resolver
 from pgvideo.narration import create_narration
 from pgvideo.orchestration import (MAX_PLAN_IMPORTS, MAX_REPAIR_ROUNDS, MAX_SAME_BLOCKER, check_instructions,
                                    duration_check, instructions, require_content_gate, require_duration)
 from pgvideo.planning import import_plan
 from pgvideo.review import import_review
 from pgvideo.script import create_script
-from test_crosscheck import ENGLISH, GLOSSARY, postgres_snapshot
+from test_crosscheck import ENGLISH, GLOSSARY, STATUS_PATH, postgres_snapshot
 from test_script import PAGE
 from test_sources import DOCUMENT, PIN, POSTGRES, PROJECT_ROOT, WIKI, WIKI_COMMIT, FakeGitHub, install_project_files, \
     wiki_files
@@ -153,7 +154,7 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("never substitutes", result["message"])
 
-    def test_packet_is_served_in_bounded_pieces(self):
+    def test_packet_returns_complete_views(self):
         _result, run_dir = self.prepare()
         packet = self.load(run_dir, "evidence-packet.json")
 
@@ -166,8 +167,9 @@ class HarnessTests(unittest.TestCase):
         index = view()
         self.assertEqual([row["id"] for row in index["sections"]], [s["id"] for s in packet["sections"]])
         self.assertEqual([row["blocks"] for row in index["sections"]], [len(s["blocks"]) for s in packet["sections"]])
-        self.assertEqual((index["digests"], index["request"], index["page"], index["pages"]),
-                         (packet["digests"], packet["request"], 1, 1))
+        self.assertEqual((index["digests"], index["request"]), (packet["digests"], packet["request"]))
+        self.assertNotIn("page", index)
+        self.assertNotIn("pages", index)
 
         # A section is returned unchanged, with the evidence its own units cite and nothing else.
         read = next(s for s in packet["sections"] if s["id"] == "read-path")
@@ -190,19 +192,80 @@ class HarnessTests(unittest.TestCase):
         full = view("--glossary", entry["term"].upper())["glossary"][0]["entry"]
         self.assertEqual((full["definition"], full["occurrences"]), (entry["definition"], len(entry["occurrences"])))
 
-        # Pages hold whole items in order, and together they are the whole list.
-        with patch("pgvideo.packet.MAX_BYTES", 600):
-            first = view("--section", "read-path")
-            self.assertGreater(first["pages"], 1)
-            blocks = [b for page in range(1, first["pages"] + 1)
-                      for b in view("--section", "read-path", "--page", str(page))["blocks"]]
-        self.assertEqual(blocks, read["blocks"])
-
-        # An unknown section, evidence ID, term, or page fails; nothing is guessed.
-        for options in (("--section", "absent"), ("--evidence", "pg:src/absent.c#L1-L3"), ("--glossary", "absent"),
-                        ("--page", "9")):
+        # An unknown section, evidence ID, or term fails; nothing is guessed.
+        for options in (("--section", "absent"), ("--evidence", "pg:src/absent.c#L1-L3"), ("--glossary", "absent")):
             status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
             self.assertEqual((status, result["status"]), (1, "failed"), options)
+
+    def test_large_packet_views_return_all_items_in_one_response(self):
+        _result, run_dir = self.prepare()
+        packet = self.load(run_dir, "evidence-packet.json")
+        # Many small entries force pagination under the old cap; one oversized entry alone did not.
+        packet["sections"] *= 100
+        section = next(s for s in packet["sections"] if s["id"] == "read-path")
+        section["blocks"] *= 100
+        packet["evidence"]["settings"] *= 100
+        packet["glossary"]["entries"] *= 100
+        evidence = packet["evidence"]["excerpts"]
+        evidence[:] = [{**evidence[0], "id": f"example-{i}"} for i in range(100)]
+        with patch("pgvideo.evidence.packet", return_value=packet):
+            for options, key, expected in (
+                ((), "sections", [s["id"] for s in packet["sections"]]),
+                (("--section", "read-path"), "blocks", section["blocks"]),
+                (("--evidence", *(e["id"] for e in evidence)), "evidence", evidence),
+                (("--glossary",), "glossary", packet["glossary"]["entries"]),
+                (("--settings",), "settings", packet["evidence"]["settings"]),
+            ):
+                with self.subTest(view=key):
+                    status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
+                    self.assertEqual((status, result["status"]), (0, "passed"), result)
+                    found = result["packet"]
+                    self.assertGreater(len(json.dumps(found).encode()), 24_000)
+                    self.assertNotIn("page", found)
+                    self.assertNotIn("pages", found)
+                    if key == "sections":
+                        self.assertEqual([s["id"] for s in found[key]], expected)
+                    elif key == "glossary":
+                        entries = [item["entry"] for item in found[key] if "entry" in item]
+                        self.assertEqual([e["id"] for e in entries], [e["id"] for e in expected])
+                    else:
+                        self.assertEqual(found[key], expected)
+
+    def test_long_citations_and_excerpt_ranges_are_complete(self):
+        snapshot = postgres_snapshot()
+        lines = snapshot[STATUS_PATH].decode().splitlines()
+        lines.extend(f"/* source line {number} */" for number in range(len(lines) + 1, 501))
+        snapshot[STATUS_PATH] = "\n".join(lines).encode()
+        self.github.add(POSTGRES, PIN, snapshot)
+        self.github.add(WIKI, WIKI_COMMIT, wiki_files(document=PAGE.replace("#L1-L7", "#L1-L500"),
+                                                    glossary=GLOSSARY), refs=["main"])
+        _result, run_dir = self.prepare()
+        packet = self.load(run_dir, "evidence-packet.json")
+        excerpt = next(e for e in packet["evidence"]["excerpts"] if e["path"] == STATUS_PATH
+                       and e["cited_lines"] == [1, 500])
+        self.assertEqual(excerpt["lines"], [1, 500])
+        self.assertEqual(excerpt["text"], "\n".join(lines))
+        self.assertNotIn("truncated", excerpt)
+        status, result, _stderr = self.command("excerpt", "--request", run_dir.name,
+                                               "--path", STATUS_PATH, "--lines", "1-500")
+        self.assertEqual((status, result["status"]), (0, "passed"), result)
+        self.assertEqual(result["excerpt"]["text"], excerpt["text"])
+        resolver = Resolver(self.workspace, run_dir)
+        self.assertIsNone(resolver.problem(excerpt["id"]))
+        for invalid in ("0-3", "2-1", "1-501"):
+            with self.subTest(lines=invalid):
+                status, result, _stderr = self.command("excerpt", "--request", run_dir.name,
+                                                       "--path", STATUS_PATH, "--lines", invalid)
+                self.assertEqual((status, result["status"]), (1, "failed"), result)
+                start, end = invalid.split("-")
+                self.assertIsNotNone(resolver.problem(f"pg:{STATUS_PATH}#L{start}-L{end}"))
+
+        # Imports must accept these IDs too, rather than retaining a separate range cap.
+        plan, _storyboard = recorded_content(self.workspace, run_dir)
+        claim = next(c for c in plan["claims"] if "example_widget" in c["text"])
+        claim["assessment"]["evidence"].append(excerpt["id"])
+        record = import_plan(self.workspace, run_dir, write(authored(self.workspace, run_dir, "long-plan.json"), plan))
+        self.assertEqual(record["status"], "passed", record["issues"])
 
     # Plan --------------------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 # Phase prompt: content plan
 
-Input: the request's evidence packet, read one bounded page at a time with `scripts/pgvideo packet` (and
-`excerpt` for more snapshot lines). Do not open `evidence-packet.json` itself.
+Input: the request's evidence packet, available through `scripts/pgvideo packet` (and
+`excerpt` for more snapshot lines).
 Output: one JSON file that matches `schemas/plan.schema.json`, imported with
 `scripts/pgvideo plan --request <id> --file <file> --json`.
 
@@ -67,7 +67,7 @@ through `revise`; never write the whole file again.
 ## Evidence IDs
 
 A document unit ID such as `short-answer.2.s1`, `pg:<path>#L<a>-L<b>` for snapshot lines (an excerpt's `id`, or
-any range from `excerpt` of at most 400 lines), `guc:<setting>` for a parsed configuration fact, or
+any range from `excerpt`), `guc:<setting>` for a parsed configuration fact, or
 `glossary:<anchor>` for a glossary entry. If a needed file is not in the snapshot, the claim has
 `insufficient_evidence`; record the missing evidence in the justification.
 

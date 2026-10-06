@@ -448,6 +448,11 @@ class HttpTests(unittest.TestCase):
         response.__enter__.return_value.read.return_value = data
         return response
 
+    def test_download_reads_the_complete_response(self):
+        data = b"x" * (64 * 1024 * 1024) + b"end of document"
+        with patch("pgvideo.sources.urlopen", return_value=io.BytesIO(data)):
+            self.assertEqual(_http_get("https://raw.githubusercontent.com/o/r/c/f"), data)
+
     def test_token_goes_only_to_github_and_not_through_redirects(self):
         with patch.dict("os.environ", {"GITHUB_TOKEN": "secret"}), \
                 patch("pgvideo.sources.urlopen", return_value=self.response(b"ok")) as opened:

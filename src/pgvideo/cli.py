@@ -153,7 +153,7 @@ def parser() -> argparse.ArgumentParser:
     excerpt.add_argument("--path", required=True, help="file path in the PostgreSQL snapshot, such as "
                                                        "src/backend/utils/misc/guc_tables.c")
     excerpt.add_argument("--lines", required=True, help="line range such as 120-160")
-    packet = request_command("packet", "print one bounded page of the request's evidence packet: its index, or "
+    packet = request_command("packet", "print a complete view of the request's evidence packet: its index, or "
                                        "one section, evidence by ID, glossary entries, or configuration facts")
     piece = packet.add_mutually_exclusive_group()
     piece.add_argument("--section", metavar="ID", help="one section's blocks, with the evidence and glossary IDs "
@@ -169,8 +169,6 @@ def parser() -> argparse.ArgumentParser:
                        help="a `revise` patch that omits, with empty reasons to fill in, every eligible section "
                             "the plan given with --plan leaves unaccounted (every eligible section without --plan)")
     packet.add_argument("--plan", type=Path, help="plan input file for --omissions-template")
-    packet.add_argument("--page", type=int, default=1, help="page of the view (default: 1); the result reports "
-                                                            "how many pages there are")
     revise = subcommands.add_parser(
         "revise", help="apply a small patch to a plan, storyboard, or review input file and write the result as a "
                        "new revision, so a repair never retypes the file")
@@ -633,7 +631,7 @@ def excerpt(args: argparse.Namespace, root: Path) -> int:
 
 
 def packet(args: argparse.Namespace, root: Path) -> int:
-    """Print one bounded page of the evidence packet, so a harness never loads the whole file."""
+    """Print a complete view of the evidence packet."""
     from .evidence import packet as load_packet
     from .packet import view
 
@@ -647,10 +645,10 @@ def packet(args: argparse.Namespace, root: Path) -> int:
 
             plan_file = contracts.project_file(root, args.plan, label="Plan file") if args.plan else None
             raw = contracts.parse(plan_file.read_bytes(), str(args.plan)) if plan_file else None
-            found = {**omissions_template(root, run_dir, load_packet(run_dir, manifest), raw), "page": 1, "pages": 1}
+            found = omissions_template(root, run_dir, load_packet(run_dir, manifest), raw)
         else:
             found = view(load_packet(run_dir, manifest), section=args.section, evidence=args.evidence,
-                         glossary=args.glossary, settings=args.settings, page=args.page)
+                         glossary=args.glossary, settings=args.settings)
     except (ValueError, OSError, KeyError) as error:
         if args.json:
             print(json.dumps({"request_id": args.request, "stage": "packet", "status": "failed", "artifacts": [],
@@ -659,8 +657,7 @@ def packet(args: argparse.Namespace, root: Path) -> int:
         else:
             print(f"pgvideo: {error}", file=sys.stderr)
         return 1
-    message = f"Page {found['page']} of {found['pages']}." + (
-        f" Repeat with --page {found['page'] + 1} for the next." if found["page"] < found["pages"] else "")
+    message = "Complete evidence packet view."
     # Compact, unlike other results: indentation is about a third of the packet's size. Reading changes nothing,
     # so the result is not kept as the request's last result.
     result = {"request_id": run_dir.name, "stage": "packet", "status": "passed", "artifacts": [], "issues": [],

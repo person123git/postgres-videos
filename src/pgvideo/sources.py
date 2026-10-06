@@ -27,7 +27,6 @@ API_ROOT = f"{API}/repos/{REPOSITORY}/contents"
 GITHUB_HOSTS = {"api.github.com", "raw.githubusercontent.com"}
 COMMIT = re.compile(r"[0-9a-f]{40}")
 REGULAR_FILE_MODES = {"100644", "100755"}
-MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 ATTEMPTS = 3
 
 
@@ -93,9 +92,7 @@ def _http_get(url: str, *, accept: str | None = None, timeout: float = 30) -> by
     for attempt in range(1, ATTEMPTS + 1):
         try:
             with urlopen(request, timeout=timeout) as response:
-                data = response.read(MAX_DOWNLOAD_BYTES + 1)
-            if len(data) > MAX_DOWNLOAD_BYTES:
-                raise SourceError(f"GitHub response exceeds {MAX_DOWNLOAD_BYTES} bytes: {url}")
+                data = response.read()
             return data
         except HTTPError as error:
             if error.code in (404, 422):

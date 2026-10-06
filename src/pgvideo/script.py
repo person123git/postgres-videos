@@ -55,7 +55,6 @@ from .evidence import PACKET, Resolver
 from .markdown import MarkdownError, _FrontMatterLoader
 from .orchestration import (DURATION_TOLERANCE, MAX_DURATION_REWRITES, MAX_REPAIR_ROUNDS, accepted_request_ids,
                             count_repair, is_harness, producer, record_event, repairs, save_authored)
-from .paths import project_directory
 from .reuse import script_sha256
 from .speech import Pronunciation, PronunciationError, unspeakable
 from .sources import write_atomic
@@ -71,8 +70,6 @@ BASELINE = "baseline"
 BUILTIN = "builtin-extractive"
 # Bump when the built-in drafter's output changes for the same inputs.
 BUILTIN_VERSION = 1
-# Full detail of the longest wiki page needs about 1,200 scenes, a storyboard of about 6 MB.
-MAX_SCENE_FILE_BYTES = 16 * 1024 * 1024
 MAX_SCENES = 2000
 DRAFTER_TIMEOUT = 900
 SEVERITIES = ("blocking", "warning", "note")
@@ -252,13 +249,13 @@ def _create(root: Path, run_dir: Path, *, storyboard: Path | None, command: Path
 
     data = None
     if command is not None:
-        path = _project_file(root, command, label="Drafter command")
+        path = contracts.project_file(root, command, label="Drafter command")
         drafter = {"kind": "command", "name": path.relative_to(root).as_posix(),
                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
         data = _run_drafter(root, path, draft_input)
         where = f"the output of {drafter['name']}"
     elif storyboard is not None:
-        path = _project_file(root, storyboard, label="Scene file")
+        path = contracts.project_file(root, storyboard, label="Scene file")
         data = path.read_bytes()
         drafter = {"kind": "file", "name": path.relative_to(root).as_posix(),
                    "sha256": hashlib.sha256(data).hexdigest()}
@@ -347,18 +344,6 @@ def create_baseline(root: Path, run_dir: Path) -> dict:
             "estimate": record["estimate"], "counts": record["counts"]}
 
 
-def _project_file(root: Path, path: Path, *, label: str) -> Path:
-    """Resolve a file argument against the project root and reject paths or symlinks that leave it."""
-    candidate = path if path.is_absolute() else root / path
-    parent = project_directory(root, candidate.parent, label=label)
-    resolved = parent / candidate.name
-    if resolved.is_symlink() or not resolved.is_file():
-        raise ValueError(f"{label} {path} must be a regular file inside the project.")
-    if resolved.stat().st_size > MAX_SCENE_FILE_BYTES:
-        raise ValueError(f"{label} {path} is larger than {MAX_SCENE_FILE_BYTES} bytes.")
-    return resolved
-
-
 def _run_drafter(root: Path, path: Path, draft_input: bytes) -> bytes:
     """Run a drafter executable with draft-input.json on standard input; return its standard output."""
     if not os.access(path, os.X_OK):
@@ -373,8 +358,6 @@ def _run_drafter(root: Path, path: Path, draft_input: bytes) -> bytes:
         detail = completed.stderr.decode("utf-8", errors="replace").strip()[-2000:]
         raise ValueError(f"Drafter command {path.relative_to(root)} exited with status {completed.returncode}"
                          + (f": {detail}" if detail else "."))
-    if len(completed.stdout) > MAX_SCENE_FILE_BYTES:
-        raise ValueError(f"Drafter command {path.relative_to(root)} wrote more than {MAX_SCENE_FILE_BYTES} bytes.")
     return completed.stdout
 
 

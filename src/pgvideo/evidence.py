@@ -37,9 +37,6 @@ from .stages import invalidate_after
 SCHEMA_VERSION = 1
 PACKET = "evidence-packet.json"
 CONTEXT_LINES = 3
-MAX_EXCERPT_LINES = 80
-# The longest range an evidence ID or the excerpt command may name.
-MAX_RANGE_LINES = 400
 # Excluded from the content digest: they differ between requests with the same evidence.
 REQUEST_FIELDS = ("request_id", "created_at", "digests", "speech")
 EVIDENCE_ID = re.compile(r"pg:(?P<path>[^#\s]+)#L(?P<start>\d+)-L(?P<end>\d+)")
@@ -159,8 +156,6 @@ class Resolver:
                 return f"{path} is not in this request's PostgreSQL snapshot"
             if not 1 <= start <= end <= len(self.evidence.lines[path]):
                 return f"{reference} is outside the {len(self.evidence.lines[path])} lines of {path}"
-            if end - start + 1 > MAX_RANGE_LINES:
-                return f"{reference} names more than {MAX_RANGE_LINES} lines"
             return None
         if reference.startswith("guc:"):
             return None if reference[4:] in self.evidence.settings else \
@@ -176,9 +171,8 @@ class Resolver:
             raise ValueError(f"{path} is not in this request's PostgreSQL snapshot. Record it as missing evidence; "
                              "pgvideo never substitutes current documentation or another version.")
         lines = self.evidence.lines[path]
-        if not 1 <= start <= end <= len(lines) or end - start + 1 > MAX_RANGE_LINES:
-            raise ValueError(f"Lines {start}-{end} are outside {path} ({len(lines)} lines) or longer than "
-                             f"{MAX_RANGE_LINES} lines.")
+        if not 1 <= start <= end <= len(lines):
+            raise ValueError(f"Lines {start}-{end} are outside {path} ({len(lines)} lines).")
         text = "\n".join(lines[start - 1:end])
         return {"id": f"pg:{path}#L{start}-L{end}", "repository": self.sources["postgres"].get("repository"),
                 "commit": self.evidence.pin, "path": path, "lines": [start, end],
@@ -309,15 +303,12 @@ def _build(root: Path, run_dir: Path) -> dict:
         if key not in excerpts:
             total = len(resolver.evidence.lines[path])
             first, last = max(1, lines[0] - CONTEXT_LINES), min(total, lines[1] + CONTEXT_LINES)
-            truncated = last - first + 1 > MAX_EXCERPT_LINES
-            if truncated:
-                first, last = max(1, lines[0]), min(total, max(1, lines[0]) + MAX_EXCERPT_LINES - 1)
             excerpt = resolver.excerpt(path, first, min(last, total)) if first <= total else None
             if excerpt is None:
                 missing.append({"path": path, "lines": lines, "link": link["id"], "cited_by": cited_by,
                                 "note": "The cited lines are past the end of the pinned file."})
                 continue
-            excerpts[key] = excerpt | {"cited_lines": list(lines), "truncated": truncated, "links": [],
+            excerpts[key] = excerpt | {"cited_lines": list(lines), "links": [],
                                        "cited_by": []}
         excerpts[key]["links"].append(link["id"])
         if cited_by and cited_by not in excerpts[key]["cited_by"]:

@@ -18,7 +18,6 @@ from referencing.jsonschema import DRAFT202012
 from .markdown import MarkdownError, _FrontMatterLoader
 from .paths import project_directory
 
-MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ERRORS = 25
 
 
@@ -78,8 +77,6 @@ def project_file(root: Path, path: Path, *, label: str) -> Path:
     resolved = parent / candidate.name
     if resolved.is_symlink() or not resolved.is_file():
         raise ValueError(f"{label} {path} must be a regular file inside the project.")
-    if resolved.stat().st_size > MAX_FILE_BYTES:
-        raise ValueError(f"{label} {path} is larger than {MAX_FILE_BYTES} bytes.")
     return resolved
 
 

@@ -250,7 +250,7 @@ a reason to evaluate focused evidence packets instead of relying solely on a
 large context window. This is a design inference, not a benchmark of a proposed
 pgvideo model. [Lost in the Middle](https://aclanthology.org/2024.tacl-1.9/).
 
-If an excerpt is insufficient, retrieve bounded surrounding context from the
+If an excerpt is insufficient, retrieve surrounding context from the
 existing snapshot. If a necessary file is absent, record the missing evidence;
 any later retrieval must go through a recorded snapshot extension at the same
 pin. Never silently substitute current documentation or a different version.
@@ -297,7 +297,7 @@ and unrestricted file/network access outside the model's output contract.
 | `document.py` | Separate structural extraction from coverage selection. Let the accepted harness-authored plan determine production coverage; retain static coverage for regression comparisons and legacy interpretation. |
 | `glossary.py` | Expose candidate matches before final coverage ranking. Preserve ambiguous candidates and version scope for semantic review. |
 | `crosscheck.py` | Keep exact fact and evidence lookup checks. Add separate semantic findings and check the plan's selected claims and dependencies. Do not let a legacy pass imply semantic approval. |
-| New `evidence.py` | Build and validate bounded evidence packets, exact quotations, and stable evidence references. |
+| New `evidence.py` | Build and validate evidence packets, exact quotations, and stable evidence references. |
 | New `orchestration.py` and `prompts/` | Define harness handoffs, structured stage results, versioned phase instructions, accepted artifact records, and repair budgets. A provider adapter is optional plumbing for a harness that needs it. |
 | New `planning.py` and `review.py` | Import and validate harness-authored plans, claim assessments, editorial findings, and limited repair requests. |
 | `script.py` and new `schemas/` | Make harness-authored scene import a first-class production path, add formal schemas and paraphrase provenance, and require semantic review. Retain strict ID, value, code, and table checks. |
@@ -352,10 +352,9 @@ machine. An offline media pipeline alone does not imply offline model inference.
 
 For a normal page, require three principal LLM phases: plan, draft, and a separate
 review. The harness may use multiple turns within each phase, including semantic
-checks of the selected source claims. Long documents need bounded chunks and an
-explicit work budget. A harness with context isolation can use a fresh review
-context; if it cannot provide the required review separation, report that missing
-capability before production. No particular multi-agent framework is required.
+checks of the selected source claims. A harness with context isolation can use a
+fresh review context; if it cannot provide the required review separation, report
+that missing capability before production. No particular multi-agent framework is required.
 
 An optional inference adapter can expose
 `generate(stage, payload, schema, model_settings) -> result, usage`, but it is not

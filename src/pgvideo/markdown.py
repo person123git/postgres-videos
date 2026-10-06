@@ -9,9 +9,6 @@ import yaml
 from markdown_it import MarkdownIt
 
 
-MAX_FRONT_MATTER = 64 * 1024
-
-
 class MarkdownError(ValueError):
     """Front matter that cannot be read safely."""
 
@@ -45,8 +42,6 @@ def split_front_matter(text: str) -> tuple[dict | None, str]:
     else:
         raise MarkdownError("front matter starting on line 1 has no closing '---' line")
     source = "\n".join(lines[1:end])
-    if len(source) > MAX_FRONT_MATTER:
-        raise MarkdownError(f"front matter is larger than {MAX_FRONT_MATTER} characters")
     try:
         data = yaml.load(source, Loader=_FrontMatterLoader)
     except yaml.YAMLError as error:

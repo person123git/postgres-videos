@@ -1,12 +1,8 @@
-"""Serve the evidence packet in bounded pieces.
+"""Serve complete views of the evidence packet.
 
-A packet for a long page is far larger than a model's context window, so a
-harness never opens evidence-packet.json itself. `view` returns one piece at a
-time: the index (the request, the document, and one row per section), one
-section with the IDs of the evidence and glossary entries its units use,
-evidence excerpts by ID, glossary entries, or the configuration facts. Every
-piece is cut into pages of at most MAX_BYTES of compact JSON; a page always
-holds at least one item, so a single item larger than that is still served.
+`view` returns the index (the request, the document, and one row per section),
+one section with the IDs of the evidence and glossary entries its units use,
+evidence excerpts by ID, glossary entries, or the configuration facts.
 
 Nothing here selects or summarizes: text is returned exactly as the packet holds
 it, and only fields that do not fit a view (a glossary entry's full occurrence
@@ -15,44 +11,17 @@ list, an indexed section's blocks) are replaced by counts.
 
 from __future__ import annotations
 
-import json
-
-MAX_BYTES = 24_000
-# Fields of the packet that every index page repeats; together they are a few kilobytes.
+# Fields of the packet included in the index.
 HEADER = ("notice", "lexical_notice", "document", "request", "speech", "review_state", "digests")
 INDEX_ROW = ("id", "heading", "level", "parent", "role", "eligible", "caveat", "reason", "words")
 GLOSSARY_ROW = ("id", "term", "tier", "result", "allowed_in_narration", "definition", "version")
-
-
-def _size(value) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode())
-
-
-def _pages(items: list, budget: int) -> list[list]:
-    """Split items, in order, into pages whose compact JSON fits the budget; an oversized item gets its own page."""
-    pages, current, used = [], [], 0
-    for item in items:
-        size = _size(item) + 1
-        if current and used + size > budget:
-            pages.append(current)
-            current, used = [], 0
-        current.append(item)
-        used += size
-    return pages + [current] if current or not pages else pages
-
-
-def _paged(view: dict, key: str, items: list, page: int) -> dict:
-    pages = _pages(items, max(MAX_BYTES - _size(view), MAX_BYTES // 4))
-    if not 1 <= page <= len(pages):
-        raise ValueError(f"--page must be between 1 and {len(pages)} for this view.")
-    return {**view, key: pages[page - 1], "page": page, "pages": len(pages)}
 
 
 def _in_section(unit: str, section: str) -> bool:
     return unit == section or unit.startswith(section + ".")
 
 
-def _index(packet: dict, page: int) -> dict:
+def _index(packet: dict) -> dict:
     glossary, evidence = packet["glossary"], packet["evidence"]
     view = {name: packet[name] for name in HEADER if name in packet}
     view["counts"] = {
@@ -64,10 +33,10 @@ def _index(packet: dict, page: int) -> dict:
     view.update({name: evidence[name] for name in ("whole_files", "missing") if evidence[name]})
     rows = [{**{name: section[name] for name in INDEX_ROW}, "blocks": len(section["blocks"])}
             for section in packet["sections"]]
-    return _paged(view, "sections", rows, page)
+    return {**view, "sections": rows}
 
 
-def _section(packet: dict, name: str, page: int) -> dict:
+def _section(packet: dict, name: str) -> dict:
     section = next((s for s in packet["sections"] if s["id"] == name), None)
     if section is None:
         raise ValueError(f"The packet has no section '{name}'; list the section IDs with `packet` and no selector.")
@@ -76,21 +45,21 @@ def _section(packet: dict, name: str, page: int) -> dict:
                               if any(_in_section(unit, name) for unit in e["cited_by"]))
     view["glossary"] = sorted(e["id"] for e in packet["glossary"]["entries"]
                               if any(_in_section(unit, name) for unit in e["occurrences"]))
-    return _paged({"section": view}, "blocks", section["blocks"], page)
+    return {"section": view, "blocks": section["blocks"]}
 
 
-def _evidence(packet: dict, names: list[str], page: int) -> dict:
+def _evidence(packet: dict, names: list[str]) -> dict:
     evidence = packet["evidence"]
     known = {e["id"]: e for e in evidence["excerpts"]} | {e["id"]: e for e in evidence["settings"]}
     absent = [name for name in names if name not in known]
     if absent:
         raise ValueError(f"The packet has no evidence {', '.join(absent)}. A section view lists the IDs its units "
                          "cite; `excerpt` serves other line ranges of a snapshot file.")
-    return _paged({"repository": evidence["repository"], "commit": evidence["commit"]}, "evidence",
-                  [known[name] for name in dict.fromkeys(names)], page)
+    return {"repository": evidence["repository"], "commit": evidence["commit"],
+            "evidence": [known[name] for name in dict.fromkeys(names)]}
 
 
-def _glossary(packet: dict, terms: list[str], page: int) -> dict:
+def _glossary(packet: dict, terms: list[str]) -> dict:
     glossary = packet["glossary"]
     view = {"verified": glossary["verified"]}
     if not terms:
@@ -98,7 +67,7 @@ def _glossary(packet: dict, terms: list[str], page: int) -> dict:
         items = [{"entry": {name: e[name] for name in GLOSSARY_ROW}} for e in glossary["entries"]]
         items += [{"ambiguous": a} for a in glossary["ambiguous"]]
         items += [{"unmatched": glossary["unmatched"]}] if glossary["unmatched"] else []
-        return _paged(view, "glossary", items, page)
+        return {**view, "glossary": items}
     wanted = {term.casefold() for term in terms}
 
     def names(entry: dict) -> set[str]:
@@ -111,18 +80,18 @@ def _glossary(packet: dict, terms: list[str], page: int) -> dict:
     if not items:
         raise ValueError(f"The glossary candidates have no entry for {', '.join(terms)}; `packet --glossary` lists "
                          "them. A term that is not a candidate must not be defined in the video.")
-    return _paged(view, "glossary", items, page)
+    return {**view, "glossary": items}
 
 
 def view(packet: dict, *, section: str | None = None, evidence: list[str] | None = None,
-         glossary: list[str] | None = None, settings: bool = False, page: int = 1) -> dict:
-    """Return one bounded page of the packet: the index by default, or the piece one selector names."""
+         glossary: list[str] | None = None, settings: bool = False) -> dict:
+    """Return a complete view of the packet: the index by default, or the selected content."""
     if section is not None:
-        return _section(packet, section, page)
+        return _section(packet, section)
     if evidence is not None:
-        return _evidence(packet, evidence, page)
+        return _evidence(packet, evidence)
     if glossary is not None:
-        return _glossary(packet, glossary, page)
+        return _glossary(packet, glossary)
     if settings:
-        return _paged({}, "settings", packet["evidence"]["settings"], page)
-    return _index(packet, page)
+        return {"settings": packet["evidence"]["settings"]}
+    return _index(packet)
