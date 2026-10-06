@@ -38,6 +38,10 @@ VERSION_LINE = re.compile(r"(?m)^<!-- instructions-version: (\d+) -->\s*$")
 REVIEW_POLICY = 1
 # Storyboard revisions allowed after a failed content review, and rewrites after a measured-duration miss.
 MAX_REPAIR_ROUNDS = 2
+# A plan repair stops when this many imports in a row have not passed, or this many judged imports in a row
+# report one blocking issue. A harness that cannot fix an issue otherwise imports revisions without end.
+MAX_PLAN_IMPORTS = 10
+MAX_SAME_BLOCKER = 3
 # A result folds more issues of one severity and code than this into a single issue.
 ISSUE_GROUP_LIMIT = 3
 ISSUE_EXAMPLES = 3
@@ -50,6 +54,10 @@ DEFAULT_TARGET_MINUTES = {"summary": 3.0, "standard": 8.0, "full": None}
 UNAVAILABLE = "unavailable"
 STATUSES = ("passed", "completed", "needs_review", "failed")
 PRODUCER_KEYS = {"harness", "model", "prompt", "parameters", "usage", "latency_seconds", "replayed_from"}
+
+
+class RepairStopped(ValueError):
+    """An import pgvideo refuses because the repair is not converging; a person decides what happens next."""
 
 
 def _now() -> str:
@@ -132,7 +140,7 @@ def start_record(root: Path, run_dir: Path, request_record: dict) -> dict:
         "review_policy": REVIEW_POLICY,
         "constraints": {key: request_record["settings"].get(key)
                         for key in ("detail", "audience", "target_minutes", "voice", "language", "speed")},
-        "repairs": {"storyboard": 0, "duration": 0},
+        "repairs": {"storyboard": 0, "duration": 0, "plan_imports": 0},
         "events": [],
         "media_reviews": [],
         "note": "Producer metadata is what the harness reported; unreported values are marked unavailable. "
@@ -248,6 +256,46 @@ def count_repair(root: Path, run_dir: Path, kind: str) -> int:
     record["repairs"][kind] = record["repairs"].get(kind, 0) + 1
     save_record(root, run_dir, record)
     return record["repairs"][kind]
+
+
+def plan_repair_stopped(run_dir: Path) -> str | None:
+    """Why pgvideo stopped this request's plan repair, or None while the repair may continue."""
+    return load_record(run_dir).get("plan_stopped")
+
+
+def count_plan_import(root: Path, run_dir: Path, *, status: str, blockers: list[str] | None = None) -> str | None:
+    """Count a plan import toward the repair limit; return why the repair stops, when this import ends it.
+
+    A pass clears the count. `blockers` names the blocking issues of an import the
+    checks judged; None is an import that failed before them, such as a schema
+    error. The repair stops when MAX_SAME_BLOCKER judged imports in a row report
+    one blocker, or MAX_PLAN_IMPORTS imports in a row have not passed. A stopped
+    repair stays stopped until a plan passes.
+    """
+    record = load_record(run_dir)
+    used = record.setdefault("repairs", {"storyboard": 0, "duration": 0})
+    if status == "passed":
+        used["plan_imports"] = 0
+        record.pop("plan_blockers", None)
+        record.pop("plan_stopped", None)
+        save_record(root, run_dir, record)
+        return None
+    used["plan_imports"] = used.get("plan_imports", 0) + 1
+    stopped = None
+    if blockers is not None:
+        history = [*record.get("plan_blockers", []), sorted(set(blockers))][-MAX_SAME_BLOCKER:]
+        record["plan_blockers"] = history
+        same = sorted(set(history[0]).intersection(*history[1:])) if len(history) == MAX_SAME_BLOCKER else []
+        if same:
+            stopped = (f"the last {MAX_SAME_BLOCKER} plan imports report the same blocking issue: "
+                       + ", ".join(same[:ISSUE_EXAMPLES])
+                       + (f", and {len(same) - ISSUE_EXAMPLES} more" if len(same) > ISSUE_EXAMPLES else ""))
+    if not stopped and used["plan_imports"] >= MAX_PLAN_IMPORTS:
+        stopped = f"{used['plan_imports']} plan imports in a row have not passed"
+    if stopped:
+        record["plan_stopped"] = stopped
+    save_record(root, run_dir, record)
+    return stopped
 
 
 def save_authored(root: Path, run_dir: Path, name: str, data: bytes) -> dict:
@@ -428,6 +476,11 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
                  "reason": "Rebuild the evidence packet."}]
     plan = (manifest.get("plan") or {}).get("status")
     if plan != "passed":
+        if record.get("plan_stopped"):
+            report = f" and runs/{rid}/{STAGE_REPORTS['plan']}" if (run_dir / STAGE_REPORTS["plan"]).is_file() else ""
+            return [{"action": "escalate", "reason": f"The plan repair is not converging: {record['plan_stopped']}. "
+                     f"Stop and report the unresolved issues{report} to the user; a person must decide. A plan a "
+                     "person revises is imported with --human-revision."}]
         reason = ("Write the content plan with prompts/plan.md and schemas/plan.schema.json from "
                   f"the evidence packet, read in pages with `{tool} packet --request {rid}`." if plan is None else
                   f"Revise the plan from runs/{rid}/plan-report.md with prompts/repair.md: patch it into a new revision "
@@ -526,8 +579,8 @@ def request_status(root: Path, run_dir: Path) -> dict:
     if harness:
         record = load_record(run_dir)
         result["settings"] = request(run_dir).get("settings")
-        result["repairs"] = {**(record.get("repairs") or {}), "max_storyboard": MAX_REPAIR_ROUNDS,
-                             "max_duration": MAX_DURATION_REWRITES}
+        result["repairs"] = {"plan_imports": 0, **(record.get("repairs") or {}), "max_storyboard": MAX_REPAIR_ROUNDS,
+                             "max_duration": MAX_DURATION_REWRITES, "max_plan_imports": MAX_PLAN_IMPORTS}
         result["instructions"] = {key: (record.get("instructions") or {}).get(key) for key in ("version", "sha256")}
         # The digests a review must name; they exclude request IDs and timestamps.
         result["digests"] = {key: (manifest.get(stage) or {}).get("digest")

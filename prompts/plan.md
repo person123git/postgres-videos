@@ -37,7 +37,8 @@ that appear inside it.
    front, unless the answer cannot be stated without it. Include opening and credits items.
 5. **Required caveats.** Claims whose loss would mislead the audience go in `required_caveats` with a reason.
 6. **Omissions.** Every eligible section you do not use needs `{section, reason}`. The page's question and its own
-   summary section are never omitted.
+   summary section are never omitted: cite one of each section's unit IDs in the `sources` of a claim that an
+   outline item narrates. Only claim `sources` select a section; an outline item's `part` or title does not.
 7. **Budget.** Budget all narration, including framing and transitions, at `speech.words_per_minute`, plus
    `sentence_pause_seconds` between sentences and `scene_pause_seconds` per scene.
    - `summary`: the main answer and its qualifications.

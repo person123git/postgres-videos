@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 # Locate this script without tools from the inherited PATH.
-case $0 in
-    */*) script_dir=${0%/*} ;;
+case "$0" in
+    */*) script_dir="${0%/*}" ;;
     *) script_dir=. ;;
 esac
 script_dir=$(CDPATH= cd -- "$script_dir" && pwd -P)

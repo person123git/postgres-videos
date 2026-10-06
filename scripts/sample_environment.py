@@ -120,7 +120,7 @@ def encode(audio: Path, image: Path) -> dict:
                     "-map", "0:v", "-map", "1:a", "-shortest",
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30",
                     "-af", "loudnorm=I=-16:TP=-1.5,aresample=48000",
-                    "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "1",
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "1",
                     "-movflags", "+faststart", str(video)], check=True)
     probe = json.loads(subprocess.run([str(FFPROBE), "-v", "error", "-show_streams", "-show_format", "-of", "json",
                                        str(video)], check=True, capture_output=True, text=True).stdout)

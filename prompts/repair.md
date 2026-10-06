@@ -71,7 +71,8 @@ value. Examples: `claims[id=size-sets-slot].sources`, `claims[*].assessment.glos
   Its patch omits every eligible section the plan does not select, each with an empty reason. Apply it with
   `revise`. Then set the reasons with a second patch: the sections that need their own reason first
   (`omissions[section=<id>].reason`), then `omissions[reason=].reason` for those that share one. An empty reason
-  fails the import. Sections the template lists under `essential` cannot be omitted: select claims from them.
+  fails the import. Sections the template lists under `essential` cannot be omitted: cite one of each section's
+  unit IDs in a claim's `sources`. `essential_omitted` reports such a section, omitted or not, and names a unit.
   Before omitting a section it lists under `caveats`, confirm no kept claim needs its qualification.
 - A fix never adds content. A claim the evidence does not support is removed, with a reason in `omissions`.
 
@@ -87,8 +88,9 @@ value. Examples: `claims[id=size-sets-slot].sources`, `claims[*].assessment.glos
    validate it before importing with `scripts/pgvideo script --request <id> --storyboard <file> --json`.
 5. Run a new separate review of the result. A repaired storyboard is never accepted on the old review.
 
-Budgets: two storyboard repair rounds after a failed content review, and one rewrite after the measured
-narration missed its target (`--duration-rewrite`, which shortens optional detail only). Make duration changes
-with `revise` too. If another repair is needed after the budget is exhausted, follow `next_actions` and stop.
-Report the remaining findings with the request ID; a person decides next. `--human-revision` is only for a
-revision a person made.
+Budgets: a plan repair is stopped when three imports in a row report the same blocking issue, or ten in a row
+have not passed. A storyboard gets two repair rounds after a failed content review, and one rewrite after the
+measured narration missed its target (`--duration-rewrite`, which shortens optional detail only). Make duration
+changes with `revise` too. If another repair is needed after a budget is exhausted, follow `next_actions` and
+stop. Report the remaining findings with the request ID; a person decides next. `--human-revision` is only for
+a revision a person made.

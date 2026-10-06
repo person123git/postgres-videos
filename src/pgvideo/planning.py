@@ -11,9 +11,10 @@ resolves; selected sources are eligible and were not left out by a reviewer's
 resolution; the request's audience, detail, and target are unchanged; Step 6
 corrections are applied and lexical lookups did not fail; every eligible section
 is either selected or omitted with a reason; the question and the page's own
-summary are not omitted; and the budget fits the target within the tolerance.
-A contradicted or unsupported claim, or an infeasible plan, is recorded and the
-plan needs review; it is never silently dropped or accepted.
+summary are selected by a claim and not omitted; and the budget fits the target
+within the tolerance. A contradicted or unsupported claim, or an infeasible plan,
+is recorded and the plan needs review; it is never silently dropped or accepted.
+A repair that does not converge is stopped after a bounded number of imports.
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ from pathlib import Path
 from . import contracts
 from .crosscheck import _recorded
 from .evidence import Resolver, packet
-from .orchestration import (DURATION_TOLERANCE, accepted_request_ids, canonical_digest, is_harness, producer,
-                            record_event, request, save_authored)
+from .orchestration import (DURATION_TOLERANCE, RepairStopped, accepted_request_ids, canonical_digest,
+                            count_plan_import, is_harness, plan_repair_stopped, producer, record_event, request,
+                            save_authored)
 from .script import PARTS, _key, _words
 from .sources import write_atomic
 from .stages import invalidate_after
@@ -49,20 +51,39 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def import_plan(root: Path, run_dir: Path, path: Path) -> dict:
+def import_plan(root: Path, run_dir: Path, path: Path, *, revision: str | None = None, limited: bool = True) -> dict:
     """Validate a plan file and record it as the request's plan stage; return the manifest record.
 
     The record's status is 'passed' or 'needs_review'. A malformed or stale file
-    marks the stage 'failed' and raises ValueError.
+    marks the stage 'failed' and raises ValueError. An import that does not pass
+    counts toward the repair limit. Once pgvideo has stopped a repair that is not
+    converging, a further import is refused without changing the request, unless
+    a person made the revision (`revision="human"`). Revalidating saved content
+    (`limited=False`) is neither counted nor refused.
     """
+    counted = limited and is_harness(run_dir)
+    stopped = plan_repair_stopped(run_dir) if counted and revision != "human" else None
+    if stopped:
+        report = f" and runs/{run_dir.name}/{REPORT}" if (run_dir / REPORT).is_file() else ""
+        raise RepairStopped(f"The plan repair was stopped because it is not converging: {stopped}. Report the "
+                            f"unresolved issues{report} to the user; a revision a person makes is imported with "
+                            "--human-revision.")
     try:
-        return _import(root, run_dir, path)
+        return _import(root, run_dir, path, revision=revision, counted=counted)
     except (ValueError, OSError) as error:
         _update_manifest(root, run_dir, status="failed", error=str(error))
+        if counted:
+            count_plan_import(root, run_dir, status="failed")
         raise
 
 
-def _import(root: Path, run_dir: Path, path: Path) -> dict:
+def _blocker(issue: dict) -> str:
+    """Name a blocking issue by its code and the section or claim it is about, for the repair limit."""
+    subject = issue.get("section") or issue.get("claim")
+    return f"{issue['code']} ({subject})" if subject else issue["code"]
+
+
+def _import(root: Path, run_dir: Path, path: Path, *, revision: str | None = None, counted: bool = True) -> dict:
     if not is_harness(run_dir):
         raise ValueError(f"Request {run_dir.name} predates the harness workflow; it has no plan stage.")
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -91,7 +112,10 @@ def _import(root: Path, run_dir: Path, path: Path) -> dict:
     entry = _update_manifest(root, run_dir, status=record["status"], record=record, sha=sha, digest=digest,
                              evidence_digest=manifest["evidence"]["digest"])
     record_event(root, run_dir, stage="plan", status=record["status"], artifact=PLAN, sha256=sha, producer=made_by,
-                 authored=record["authored"])
+                 authored=record["authored"], revised_by="human" if revision == "human" else None)
+    if counted or record["status"] == "passed":
+        count_plan_import(root, run_dir, status=record["status"],
+                          blockers=[_blocker(issue) for issue in record["issues"] if issue["severity"] == "blocking"])
     return entry
 
 
@@ -308,10 +332,8 @@ class _Check:
                 self.issue("warning", "omitted_but_selected", f"Section {item['section']} is listed as omitted, but "
                            "the plan selects claims from it.", section=item["section"])
             omissions.append({"section": item["section"], "heading": section["heading"], "reason": item["reason"]})
-            if item["section"] == self.question or section["role"] == "summary":
-                self.issue("blocking", "essential_omitted", f"Section {item['section']} ({section['heading']}) is "
-                           f"the page's {'question' if item['section'] == self.question else 'own summary'}; a video "
-                           "cannot leave it out.", section=item["section"])
+            if self._is_essential(section):
+                self._essential(section, omitted=True, selected=item["section"] in selected)
             elif section["caveat"] or section["role"] == "open_questions":
                 self.issue("warning", "caveat_omitted", f"Section {item['section']} ({section['heading']}) holds "
                            f"caveats and is left out: {item['reason']} The content review must confirm no material "
@@ -319,11 +341,38 @@ class _Check:
         for section in self.sections.values():
             if not section["eligible"] or not section["blocks"] or section["id"] in selected or section["id"] in seen:
                 continue
+            if self._is_essential(section):
+                # Reported like an omission: offering to omit it would send the harness back and forth.
+                self._essential(section, omitted=False, selected=False)
+                continue
             self.issue("blocking", "section_unaccounted", f"Eligible section {section['id']} ({section['heading']}) "
                        "is neither selected nor omitted with a reason.", section=section["id"],
                        action="Select claims from it, or add {section, reason} to omissions. `packet --omissions-template "
                               "--plan <file>` writes the patch that omits every unaccounted section.")
         return omissions
+
+    def _is_essential(self, section: dict) -> bool:
+        return section["id"] == self.question or section["role"] == "summary"
+
+    def _essential(self, section: dict, *, omitted: bool, selected: bool) -> None:
+        """Report the question or the page's own summary when the plan omits it or no claim selects it.
+
+        Both states are one issue with one fix. A section is selected only by a
+        claim that cites one of its units; an outline item does not select it.
+        """
+        what = "question" if section["id"] == self.question else "own summary"
+        state = "It is listed in `omissions`." if omitted else "No claim cites one of its units."
+        if selected:
+            action = "Remove it from `omissions`; a claim already cites it."
+        else:
+            units = {unit: info for unit, info in self.resolver.units.items() if info.get("section") == section["id"]}
+            sentences = [unit for unit, info in units.items() if info.get("kind") == "sentence"]
+            unit = next(iter(sentences or units), None)
+            action = ("Cite one of its unit IDs" + (f", such as `{unit}`," if unit else "") + " in the `sources` of a "
+                      "claim that an outline item narrates" + (", and remove it from `omissions`" if omitted else "")
+                      + ". Only claim `sources` select a section; an outline item's `part` or title does not.")
+        self.issue("blocking", "essential_omitted", f"Section {section['id']} ({section['heading']}) is the page's "
+                   f"{what}; a video cannot leave it out. {state}", section=section["id"], action=action)
 
     def _caveats(self, claims: dict[str, dict], outline: list[dict]) -> None:
         planned = {claim_id for item in outline for claim_id in item["claims"]}

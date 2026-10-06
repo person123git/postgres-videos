@@ -159,7 +159,7 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
     return results
 
 
-def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: int = 128) -> dict:
+def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: int = 192) -> dict:
     """Build a draft MP4; Step 11 validates it before delivery."""
     if not 0 <= crf <= 51 or not 32 <= audio_bitrate <= 512:
         raise ValueError("CRF must be 0–51 and audio bitrate must be 32–512 kb/s")

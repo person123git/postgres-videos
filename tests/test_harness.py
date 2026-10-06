@@ -21,8 +21,8 @@ from unittest.mock import patch
 from harness_fixture import accept_content, authored, recorded_content, recorded_review, write
 from pgvideo import cli
 from pgvideo.narration import create_narration
-from pgvideo.orchestration import (MAX_REPAIR_ROUNDS, check_instructions, duration_check, instructions,
-                                   require_content_gate, require_duration)
+from pgvideo.orchestration import (MAX_PLAN_IMPORTS, MAX_REPAIR_ROUNDS, MAX_SAME_BLOCKER, check_instructions,
+                                   duration_check, instructions, require_content_gate, require_duration)
 from pgvideo.planning import import_plan
 from pgvideo.review import import_review
 from pgvideo.script import create_script
@@ -214,7 +214,8 @@ class HarnessTests(unittest.TestCase):
             changed = copy.deepcopy(plan)
             change(changed)
             path = write(authored(self.workspace, run_dir, "plan.json"), changed)
-            record = import_plan(self.workspace, run_dir, path)
+            # Each case is a different plan, not a repair of the last one, so the repair limit is left out.
+            record = import_plan(self.workspace, run_dir, path, limited=False)
             return record, self.load(run_dir, "plan.json")
 
         record, _plan = imported(lambda p: None)
@@ -257,6 +258,123 @@ class HarnessTests(unittest.TestCase):
                 imported(change)
         self.assertEqual(self.load(run_dir, "manifest.json")["plan"]["status"], "failed")
 
+    def test_the_question_is_selected_by_a_claim_and_never_omitted(self):
+        _result, run_dir = self.prepare()
+        plan, _storyboard = recorded_content(self.workspace, run_dir)
+        asks = {c["id"] for c in plan["claims"] if any(s.startswith("question.") for s in c["sources"])}
+        self.assertTrue(asks)
+
+        def unselect(p):
+            """Leave the outline's question item in place, with no claim that cites the question."""
+            p["claims"] = [c for c in p["claims"] if c["id"] not in asks]
+            for item in p["outline"]:
+                item["claims"] = [c for c in item["claims"] if c not in asks]
+            p["main_answer"]["claims"] = [c for c in p["main_answer"]["claims"] if c not in asks] or \
+                [p["claims"][0]["id"]]
+            p["required_caveats"] = [c for c in p["required_caveats"] if c["claim"] not in asks]
+
+        def omit(p):
+            p["omissions"].append({"section": "question", "reason": "Too long."})
+
+        def reported(*changes) -> dict:
+            changed = copy.deepcopy(plan)
+            for change in changes:
+                change(changed)
+            import_plan(self.workspace, run_dir, write(authored(self.workspace, run_dir, "plan.json"), changed),
+                        limited=False)
+            blocking = [i for i in self.load(run_dir, "plan.json")["issues"]
+                        if i["section"] == "question" and i["severity"] == "blocking"]
+            self.assertEqual([i["code"] for i in blocking], ["essential_omitted"], blocking)
+            return blocking[0]
+
+        # Not omitted and not cited, or omitted, or both: one issue, whose action names the fix for that state.
+        self.assertTrue(any(item["part"] == "question" for item in plan["outline"]))
+        issue = reported(unselect)
+        self.assertIn("No claim cites one of its units.", issue["message"])
+        self.assertRegex(issue["action"], r"^Cite one of its unit IDs, such as `question\.1\.s1`, in the `sources`")
+        self.assertIn("an outline item's `part` or title does not", issue["action"])
+        self.assertNotIn("omissions", issue["action"])
+        issue = reported(unselect, omit)
+        self.assertIn("It is listed in `omissions`.", issue["message"])
+        self.assertIn("such as `question.1.s1`", issue["action"])
+        self.assertIn("and remove it from `omissions`", issue["action"])
+        issue = reported(omit)
+        self.assertEqual(issue["action"], "Remove it from `omissions`; a claim already cites it.")
+        self.assertIn("Remove it from `omissions`", (run_dir / "plan-report.md").read_text(encoding="utf-8"))
+
+    def test_a_plan_repair_that_does_not_converge_is_stopped(self):
+        _result, run_dir = self.prepare()
+        plan, _storyboard = recorded_content(self.workspace, run_dir)
+        rid, folder = run_dir.name, authored(self.workspace, run_dir, "x").parent
+        attempts = iter(range(1, 100))
+
+        def attempt(change, *options) -> tuple[int, dict]:
+            changed = copy.deepcopy(plan)
+            change(changed)
+            file = write(folder / f"plan.v{next(attempts)}.json", changed)
+            status, result, _stderr = self.command("plan", "--request", rid, "--file", str(file), *options)
+            return status, result
+
+        def omit(p):
+            p["omissions"].append({"section": "question", "reason": "Too long."})
+
+        def over(p):
+            p["outline"][0].update(budget_seconds=3000)
+
+        def used() -> dict:
+            return self.command("status", "--request", rid)[1]["repairs"]
+
+        # Blocking issues that change from one import to the next do not stop a repair.
+        for change in (omit, over, omit, over):
+            status, result = attempt(change)
+            self.assertEqual((status, result["next_actions"][0]["action"]), (3, "author"), result)
+        self.assertEqual((used()["plan_imports"], used()["max_plan_imports"]), (4, MAX_PLAN_IMPORTS))
+
+        # One blocking issue may survive two fixes. The import that reports it a third time ends the repair.
+        for _fix in range(MAX_SAME_BLOCKER - 1):
+            status, result = attempt(omit)
+            self.assertEqual((status, result["next_actions"][0]["action"]), (3, "author"), result)
+        status, result = attempt(omit)
+        self.assertEqual((status, result["status"]), (3, "needs_review"))
+        action = result["next_actions"][0]
+        self.assertEqual(action["action"], "escalate")
+        self.assertIn(f"the last {MAX_SAME_BLOCKER} plan imports report the same blocking issue: "
+                      "essential_omitted (question)", action["reason"])
+        self.assertIn("--human-revision", action["reason"])
+
+        # A further import is refused and changes nothing, even one that would pass. Status says the same.
+        before = (self.load(run_dir, "manifest.json"), used()["plan_imports"])
+        status, result = attempt(lambda p: None)
+        self.assertEqual((status, result["status"], result["issues"][0]["code"]), (1, "failed", "repair_stopped"))
+        self.assertIn("not converging", result["message"])
+        self.assertEqual(result["next_actions"][0]["action"], "escalate")
+        self.assertEqual((self.load(run_dir, "manifest.json"), used()["plan_imports"]), before)
+        self.assertEqual(self.command("status", "--request", rid)[1]["next_actions"][0]["action"], "escalate")
+
+        # Checking saved content again is not a repair: it is neither refused nor counted.
+        status, result, _stderr = self.command("resume", "--request", rid)
+        self.assertEqual((status, result["status"]), (3, "needs_review"), result)
+        self.assertEqual(used()["plan_imports"], before[1])
+
+        # A person's revision is imported and recorded. A plan that passes clears the limit.
+        status, result = attempt(omit, "--human-revision")
+        self.assertEqual((status, result["next_actions"][0]["action"]), (3, "escalate"))
+        status, result = attempt(lambda p: None, "--human-revision")
+        self.assertEqual((status, result["status"]), (0, "passed"), result)
+        record = self.load(run_dir, "orchestration.json")
+        self.assertEqual(record["events"][-1].get("revised_by"), "human")
+        self.assertEqual((record["repairs"]["plan_imports"], record.get("plan_stopped")), (0, None))
+
+        # Imports that fail before the checks count too: the repair ends after MAX_PLAN_IMPORTS misses in a row.
+        for _miss in range(MAX_PLAN_IMPORTS - 1):
+            status, result = attempt(lambda p: p.update(status="passed"))
+            self.assertEqual((status, result["status"], result["next_actions"][0]["action"]), (1, "failed", "author"))
+        status, result = attempt(lambda p: p.update(status="passed"))
+        self.assertEqual(result["next_actions"][0]["action"], "escalate")
+        self.assertIn(f"{MAX_PLAN_IMPORTS} plan imports in a row have not passed", result["next_actions"][0]["reason"])
+        status, result = attempt(lambda p: None)
+        self.assertEqual((status, result["issues"][0]["code"]), (1, "repair_stopped"))
+
     def test_a_repair_reads_a_compact_result_and_patches_a_new_revision(self):
         _result, run_dir = self.prepare()
         plan, _storyboard = recorded_content(self.workspace, run_dir)
@@ -281,7 +399,12 @@ class HarnessTests(unittest.TestCase):
         before = source.read_bytes()
         status, result, _stderr = self.command("plan", "--request", rid, "--file", str(source))
         self.assertEqual((status, result["status"]), (3, "needs_review"))
-        codes = [issue["code"] for issue in result["issues"]]
+        # The question and the summary are never omitted: each keeps its own issue, with a unit to cite.
+        essential = {issue["section"]: issue["action"] for issue in result["issues"]
+                     if issue["code"] == "essential_omitted"}
+        self.assertEqual(set(essential), {"question", "short-answer"})
+        self.assertIn("such as `question.1.s1`", essential["question"])
+        codes = [issue["code"] for issue in result["issues"] if issue["code"] != "essential_omitted"]
         self.assertEqual(len(codes), len(set(codes)), codes)
         unknown = next(issue for issue in result["issues"] if issue["code"] == "unknown_source")
         renamed = sum(1 for c in plan["claims"] for s in c["sources"] if "." in s)

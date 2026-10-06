@@ -137,6 +137,7 @@ The other commands' options:
 
 | Command | Option | Default | Meaning |
 | --- | --- | --- | --- |
+| `plan` | `--human-revision` | off | A person revised this plan after pgvideo stopped a repair that was not converging. |
 | `script` | `--storyboard` | none | The harness's version 2 scene file (JSON or YAML) inside the project. |
 | `script` | `--drafter-command` | none | An optional adapter: an executable inside the project that reads `draft-input.json` on standard input and writes the scene file on standard output, offline. |
 | `script` | `--duration-rewrite` | off | This storyboard shortens optional detail after the measured narration missed its target (one rewrite). |
@@ -148,7 +149,7 @@ The other commands' options:
 | `narrate` | `--true-peak` | `-1.5` | Maximum true peak, from -9 to 0 dBTP. |
 | `narrate` | `--refresh-unit` | none | Synthesize a unit or sentence again even though it is cached, such as `s01-title.n1.u1`. Repeat the option for several. |
 | `render` | `--crf` | `20` | H.264 constant rate factor, from 0 to 51; lower is higher quality. |
-| `render` | `--audio-bitrate` | `128` | AAC bitrate, from 32 to 512 kb/s. |
+| `render` | `--audio-bitrate` | `192` | AAC bitrate, from 32 to 512 kb/s. |
 
 ### Exit status
 
@@ -243,7 +244,7 @@ audio cache. What stops a request and what happens next:
 | --- | --- | --- |
 | Source snapshot or document | `source-report.md`, `coverage.md` | The wiki page needs a fix, such as a version conflict or missing evidence. Fix the page, then prepare a new request. |
 | Glossary cross-check | `glossary-check.md` | Decide each blocking issue and record it in `runs/<id>/resolutions.yaml` (the report gives a snippet for each), then ask the harness to resume, or run `scripts/pgvideo resume --request <id>`. The harness may propose a resolution, but only you record it. |
-| Plan | `plan-report.md` | The harness fixes what it can, with a patch (see below). An infeasible plan, a contradicted claim, or missing evidence is reported to you: change the target or detail, or accept the omission. |
+| Plan | `plan-report.md` | The harness fixes what it can, with a patch (see below). An infeasible plan, a contradicted claim, or missing evidence is reported to you: change the target or detail, or accept the omission. A repair that does not converge is stopped and reported too: after three imports in a row with the same blocking issue, or ten in a row without a pass. |
 | Storyboard | `script.md` | The harness patches the named issues into a new revision and imports it. |
 | Content review | `content-report.md` | The harness gets two repair rounds; then it reports the remaining findings for your decision. |
 | Measured length | `status` | One rewrite of optional detail; then you may accept the length (`build --accept-duration`). |
@@ -400,7 +401,7 @@ credentials; `--drafter-command` adapters run offline too. See
 | A session on a small model ends in the middle of a repair, with nothing written | The response stopped at the model's output limit while retyping a file. Tell the harness to repair with a patch and `scripts/pgvideo revise` (see [Repair a plan or storyboard with a patch](#repair-a-plan-or-storyboard-with-a-patch)). |
 | "insufficient_evidence" or "missing evidence" | A claim needs a file or range that is not in the pinned snapshot. The claim is left out, or you decide what to do; pgvideo never substitutes other documentation. |
 | "made from other evidence", "reviews another storyboard" | A file is stale: a stage before it changed. Write it again from the current files; `status` lists the digests. |
-| The repair budget is used | The remaining findings need your decision; a revision you make is imported with `--human-revision`. |
+| The repair budget is used, or a plan repair was stopped | The remaining findings need your decision; a revision you make is imported with `--human-revision`. |
 | The measured length misses the target | The harness rewrites optional detail once; then you accept the length or change the target in a new request. |
 | Media checks failed | See `quality-report.json`; repeat the media stage. Content is not regenerated. |
 | Command fails before starting | `scripts/pgvideo doctor` names the missing or changed local dependency; `scripts/setup --offline` restores it. |
@@ -1058,6 +1059,10 @@ commit-specific citations. Validation fully decodes the draft, checks its
 streams, timing, caption coverage, spoken units, silence, and loudness, then
 copies the MP4 and accompanying files to `output/<request-id>/`. The run's
 `quality-report.json` records the measurements and delivery hashes.
+
+The audio is encoded at 192 kb/s by default. At 128 kb/s the AAC encoder can
+replace loud "s" sounds with noise, and the decoded noise can exceed the
+true-peak limit that validation checks.
 
 When a stage runs again, the manifest drops the records of every later stage,
 including an earlier validation, so it never describes media that was built

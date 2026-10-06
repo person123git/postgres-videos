@@ -32,7 +32,7 @@ def delivery_fixture(run: Path, output: Path, detail: str | None = None) -> None
     subprocess.run([str(ffmpeg), "-v", "error", "-y", "-f", "lavfi", "-i",
                     "color=c=blue:s=640x360:r=30:d=1", "-f", "lavfi", "-i",
                     "sine=frequency=440:sample_rate=24000:duration=1", "-c:v", "libx264",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                     "-ac", "1", "-frames:v", "30", str(draft)], check=True)
     document = {"path": "wiki/v18/sample.md", "version": 18,
                 "url": "https://github.com/example/wiki/blob/" + "a" * 40 + "/wiki/v18/sample.md"}

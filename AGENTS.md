@@ -1,4 +1,4 @@
-<!-- instructions-version: 7 -->
+<!-- instructions-version: 8 -->
 # AGENTS.md: pgvideo workflow
 
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
@@ -21,6 +21,11 @@ For all repository work, use the temporary-file convention below.
    [the recovery rules](#mandatory-file-writing-and-recovery) before retrying.
 5. For videos, run only the next permitted stage. Read the complete `status`, `issues`, and
    `next_actions` after each command. Continue until delivery or an explicit stop condition below.
+6. **Stop when a repair is not converging.** After each import, compare its blocking issues with the earlier
+   imports of that stage. Stop and report the issue, request ID, report path, and what you tried when the same
+   blocking issue survives two fixes, when an issue you already fixed returns, or when you have no fix left
+   that you have not already tried. pgvideo enforces this for plans; see
+   [repair](#5-repair-only-when-a-result-requests-it).
 
 The output budget applies to patches, heredocs, and helper scripts too. Splitting a complete replacement
 across calls does not make it an allowed repair. Do not regenerate an existing input with Python.
@@ -111,8 +116,9 @@ directory per PostgreSQL version), but they play different roles.
   drafts, review notes, intermediate inputs, and ad hoc logs.
 - Create a subdirectory for each task or request, such as `.scratch/<id>/`. Keep unfinished work available
   for resuming the task.
-- Store editable video inputs there, for example `.scratch/<id>/plan.v1.json`. Use a new filename for each
-  revision, such as `plan.v2.json`.
+- Store editable video inputs there, for example `.scratch/<id>/plan.v1.json`. Only the first draft (`.v1`) is
+  written by you. Every later revision, such as `plan.v2.json`, is the `--out` of `scripts/pgvideo revise`;
+  syntax-only recovery copies a broken draft on disk instead.
 - Let pgvideo manage its runtime temporary files through `scripts/pgvideo`; the wrapper configures
   `.runtime/tmp/`. The `.scratch/` recommendation applies to files you create while working on the project.
 
@@ -153,6 +159,10 @@ directory per PostgreSQL version), but they play different roles.
   create it from the task context. Continue at the first section the ledger does not mark read.
   Do not restart the packet. Verify relevant source text before editing or making claims; notes and
   summaries locate evidence but do not replace it.
+- You were compacted if the conversation opens with a summary of earlier work or a message only tells you to
+  continue. Treat remembered IDs, digests, and packet text as lost: read your state, run `status`, and take
+  unit IDs only from your ledger or a new `packet` read of that section. Never run `prepare` again to look
+  something up.
 - For video recovery, make the first workflow command
   `scripts/pgvideo status --request "<id>" --json`; follow the recovery and instruction-version rules below.
   Use its result for current stages, digests, repair budgets, and next actions. Preserve independent review
@@ -194,6 +204,16 @@ These restrictions apply even when the first import failed and nothing has been 
    before its first use. Locate the affected entries with `rg`, then read only the needed ranges.
 2. Write only the changed fields as a JSON patch in `.scratch/<id>/fix1.json`. Validate the patch with
    `jq empty .scratch/<id>/fix1.json`. If it fails, fix the patch; do not touch the input.
+   A patch is a JSON list of operations; [prompts/repair.md](prompts/repair.md) has the full grammar. Example:
+
+   ```json
+   [
+     {"op": "set", "path": "claims[id=<claim-id>].sources", "value": ["question.1.s1"]},
+     {"op": "add", "path": "outline[id=<item-id>].claims", "value": "<claim-id>"},
+     {"op": "remove", "path": "omissions[section=question]"}
+   ]
+   ```
+
 3. Apply the patch to the latest valid revision. Use a new output filename. Example for a plan:
 
    ```sh
@@ -296,7 +316,8 @@ Correct:
 - Model calls and credentials are your responsibility. pgvideo never calls a model. Only setup and prepare
   use the network for project downloads.
 - Read the prompt and schema for a phase before writing its input. Use the schema's exact field names and
-  allowed values. Copy request IDs and digests from current tool results; do not invent them or producer metadata.
+  allowed values. Copy request IDs, digests, and document unit IDs from current tool results; do not invent them
+  or producer metadata.
 - pgvideo owns `plan.json`, `storyboard.json`, `content-review.json`, `manifest.json`, `inputs/`, and `authored/`
   under the request directory. Keep your editable input files in `.scratch/<id>/` and import them.
 - Pass `--json` to the workflow commands below. Replace placeholders such as `<id>` and `<file>` with real
@@ -313,7 +334,7 @@ Read `status`, `issues`, and `next_actions`. Do not infer success from a file's 
 | `passed` (exit 0) | Follow `next_actions`. This stage passed; the video may still be incomplete. |
 | `completed` (exit 0) | Confirm the build completed, then inspect and deliver as described below. |
 | `needs_review` (exit 3) | Follow the named repair or escalation. Do not continue to a dependent stage. |
-| `failed` (exit 1) | Read the error. Stop for an integrity failure or unavailable required capability. Otherwise correct the cause or retry a transient failure. |
+| `failed` (exit 1) | Read the error. Stop for an integrity failure, an unavailable required capability, or a `repair_stopped` issue. Otherwise correct the cause or retry a transient failure. |
 
 Interpret `next_actions[].action` as follows:
 
@@ -380,9 +401,13 @@ scripts/pgvideo excerpt --request "<id>" --path "<snapshot-file>" --lines "<star
 ```
 
 Write the main answer, learning objectives, ordered outline, time budgets, claims with source and evidence
-assessments, required caveats, and reasons for omitted eligible sections. Include the page's question and summary.
+assessments, required caveats, and reasons for omitted eligible sections.
 Copy request settings unchanged. If the source material cannot satisfy the required scope and duration, set
 `feasibility.status` to `infeasible` with the reason. Do not change the target or remove necessary qualifications.
+
+The page's question and summary sections are never omitted: for each, cite one of its unit IDs (such as
+`question.1.s1`) in the `sources` of a claim that an outline item narrates. Only claim `sources` select a
+section; an outline item's `part` or title does not.
 
 ```sh
 scripts/pgvideo plan --request "<id>" --file ".scratch/<id>/plan.v1.json" --json
@@ -443,15 +468,22 @@ Build only after pgvideo accepts the current plan, storyboard, and independent r
   applies to every selected entry; otherwise select only the affected IDs.
 - For a plan's unaccounted sections, use `scripts/pgvideo packet --request "<id>" --omissions-template --plan
   "<file>"`; it writes the patch that omits them, and you set the reasons.
+  The template never omits the question or summary; it lists them under `essential`. `essential_omitted`
+  means: cite one of that section's unit IDs in a claim, and remove the section from `omissions` if it is there.
 - Import the revision as a new input file. Revalidate dependent stages; every changed storyboard needs a new
   independent review. If a fix requires a different plan, revise and import the plan first.
 - Allow at most two storyboard repair rounds after a failed content review. Use the budget recorded in `status`
   and `next_actions`; never reset it or label your own work `--human-revision`.
+- A plan repair that does not converge is stopped. pgvideo ends it when three imports in a row report the same
+  blocking issue, or ten in a row have not passed: the result says `escalate`, and a further import is refused
+  with a `repair_stopped` issue. Stop and report. Never work around it with a new request, another filename, or
+  `--human-revision`. `status` reports the count as `repairs.plan_imports`.
 - Retry transient tool or model failures without treating them as content repairs.
 - After a person records source resolutions, or the instruction version changes, follow `status` and use
   `scripts/pgvideo resume --request "<id>" --json` to recheck evidence and saved artifacts.
 - Stop for an unresolved source decision, integrity failure, unavailable required tool or model, infeasible
-  plan, or exhausted repair budget. Keep progress and report the exact issue, request ID, and next action.
+  plan, exhausted repair budget, or a repair that is not converging (execution rule 6). Keep progress and report
+  the exact issue, request ID, and next action.
 - Never substitute `baseline` for the requested video; it is only an extractive comparison.
 
 ## 6. Build, inspect, and deliver
@@ -467,6 +499,16 @@ Make that duration revision with `revise`; the flag does not permit retyping the
 Preserve mandatory content and the target. After that, report any remaining miss; pass `build --accept-duration`
 only when the user explicitly accepts the measured length. Do not spend another rewrite or invent padding.
 
+### Audio encoding
+
+`build` encodes the audio at 192 kb/s. No separate render is needed after it.
+
+If a result reports `Encoded audio loudness is outside delivery limits`, stop and report the issue, its values,
+the request ID, and `runs/<id>/quality-report.json`. **Never** repair a loudness issue by changing
+`narrate --true-peak`, `narrate --lufs`, or `render --crf`, or with an audio bitrate below 192. Below 192 kb/s
+the AAC encoder can replace loud "s" sounds with noise that exceeds the true-peak limit, and more peak headroom
+does not remove that noise.
+
 After `build` returns `completed`:
 
 1. Inspect a few slides in `runs/<id>/render/slides/` and read the quality report. Report any limitation.
@@ -477,8 +519,8 @@ After `build` returns `completed`:
    ```
 
    Use `--kind listening` only if you actually listened to the audio. Do not infer a listening review from text.
-3. Return the paths from the build result's `delivery`: MP4, transcript, captions, references, glossary report,
-   content report, plan, and quality report.
+3. Return the delivered paths. `delivery.directory` in `runs/<id>/quality-report.json` names the folder that
+   holds them: MP4, transcript, captions, references, glossary report, content report, plan, and quality report.
 4. State outstanding limitations, including no listening review, an accepted duration miss, or minor findings.
 
 The request is complete only after a completed build and delivery of these paths. A plan, script, or draft MP4

@@ -34,7 +34,8 @@ from .sources import DEFAULT_REF, FALLBACK_REF, REPOSITORY, SourceError, resolve
 # Exit status for a request that needs a documented resolution before it can continue.
 NEEDS_REVIEW = 3
 # Narration and encoding settings that build, resume, and script use; a reuse lookup plans with them.
-LUFS, TRUE_PEAK, CRF, AUDIO_BITRATE = -16.0, -1.5, 20, 128
+# At 128 kb/s the AAC encoder's noise substitution raised the decoded true peak above validation's limit.
+LUFS, TRUE_PEAK, CRF, AUDIO_BITRATE = -16.0, -1.5, 20, 192
 NO_REUSE = ("build the narration and MP4 even when a validated video with the same inputs exists; "
             "it is registered for reuse afterwards")
 JSON_HELP = "print one structured stage result as JSON on standard output; progress goes to standard error"
@@ -113,6 +114,8 @@ def parser() -> argparse.ArgumentParser:
     request_command("status", "report a request's stages, artifacts, unresolved issues, and legal next steps")
     plan = request_command("plan", "import and check the content plan the harness wrote from the evidence packet")
     plan.add_argument("--file", type=Path, required=True, help="plan file (JSON or YAML) inside the project")
+    plan.add_argument("--human-revision", action="store_true",
+                      help="a person revised this plan after pgvideo stopped a repair that was not converging")
 
     script = request_command(
         "script", "import and check the storyboard the harness wrote from the accepted plan (for an older request: "
@@ -191,7 +194,7 @@ def parser() -> argparse.ArgumentParser:
     request_command("timing", "rebuild scene timing and captions from passed narration", json_output=False)
     render = request_command("render", "render, validate, and deliver the MP4 from passed timing", json_output=False)
     render.add_argument("--crf", type=int, default=CRF, help="H.264 constant rate factor (default: 20)")
-    render.add_argument("--audio-bitrate", type=int, default=AUDIO_BITRATE, help="AAC bitrate in kb/s (default: 128)")
+    render.add_argument("--audio-bitrate", type=int, default=AUDIO_BITRATE, help="AAC bitrate in kb/s (default: 192)")
     request_command("validate", "validate and deliver an existing rendered request", json_output=False)
     return command
 
@@ -307,7 +310,7 @@ def _harness_command(root: Path, args: argparse.Namespace, stage: str, work) -> 
     In JSON mode, progress lines go to standard error so standard output holds
     only the result. An error becomes a `failed` result with the message.
     """
-    from .orchestration import check_instructions, is_harness, stage_result
+    from .orchestration import RepairStopped, check_instructions, is_harness, stage_result
 
     stdout = sys.stdout
     with contextlib.redirect_stdout(sys.stderr if getattr(args, "json", False) else sys.stdout):
@@ -318,17 +321,21 @@ def _harness_command(root: Path, args: argparse.Namespace, stage: str, work) -> 
                       "issues": [{"severity": "blocking", "code": "request", "message": str(error)}],
                       "next_actions": [], "message": f"pgvideo: {error}"}
             return _emit(root, args, result, stdout)
-        notes = []
+        notes, refused = [], False
         try:
             if is_harness(run_dir):
                 notes = check_instructions(root, run_dir)
             status, message, *extra = work(run_dir)
         except (ValueError, OSError, KeyError, TypeError) as error:
             status, message, extra = "failed", f"pgvideo: {error}", []
+            refused = isinstance(error, RepairStopped)
         result = stage_result(run_dir, stage, status, " ".join([*notes, message]))
         for fields in extra:
             result.update(fields)
-        if status == "failed" and not any(i["severity"] == "blocking" for i in result["issues"]):
+        if refused:
+            # The request is unchanged, so its issues are the last import's; name the refusal first.
+            result["issues"].insert(0, {"severity": "blocking", "code": "repair_stopped", "message": message})
+        elif status == "failed" and not any(i["severity"] == "blocking" for i in result["issues"]):
             result["issues"].insert(0, {"severity": "blocking", "code": "stage_failed", "message": message})
     return _emit(root, args, result, stdout)
 
@@ -467,7 +474,7 @@ def plan(args: argparse.Namespace, root: Path) -> int:
 
     def work(run_dir: Path) -> tuple[str, str]:
         _require_harness(run_dir, "plan")
-        record = import_plan(root, run_dir, args.file)
+        record = import_plan(root, run_dir, args.file, revision="human" if args.human_revision else None)
         estimate = record["estimate"]
         return record["status"], (f"Plan {record['status']}: {record['counts']['claims']} claims in "
                                   f"{record['counts']['outline']} outline items, {record['counts']['omissions']} "
@@ -575,7 +582,8 @@ def _revalidate(root: Path, run_dir: Path, source: Path, *, replayed_from: str |
             # Import a copy kept in this request, so its record names a file this request owns.
             path = write_atomic(root, run_dir.relative_to(root) / "replay" / name, path.read_bytes(), label="Request")
         if stage == "plan":
-            record = import_plan(root, run_dir, path)
+            # Saved content is checked again, not repaired: it does not count toward the plan repair limit.
+            record = import_plan(root, run_dir, path, limited=False)
         elif stage == "script":
             record = create_script(root, run_dir, storyboard=path)
         else:

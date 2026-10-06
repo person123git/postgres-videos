@@ -7,6 +7,7 @@ timing test_integration.py checks with the real model.
 
 import contextlib
 import copy
+import inspect
 import io
 import json
 import shutil
@@ -19,6 +20,7 @@ from unittest.mock import patch
 import numpy as np
 
 from pgvideo import cli, reuse
+from pgvideo import narration as narration_module
 from pgvideo import render as render_module
 from pgvideo.stages import STAGES, invalidate_after
 from harness_fixture import accept_content
@@ -85,7 +87,7 @@ def components() -> dict:
         manifest, storyboard,
         narration={"voice": "af_heart", "language": "a", "speed": 1.0, "loudness_lufs": -16.0,
                    "true_peak_dbtp": -1.5, "model": "6" * 64, "config": "7" * 64, "voice_asset": "8" * 64},
-        render={"width": 1920, "height": 1080, "fps": 30, "crf": 20, "audio_bitrate_kbps": 128},
+        render={"width": 1920, "height": 1080, "fps": 30, "crf": 20, "audio_bitrate_kbps": 192},
         tools=reuse.tools(PROJECT_ROOT))
 
 
@@ -108,7 +110,7 @@ class KeyTests(unittest.TestCase):
             "script": ("script",), "pronunciation rules": ("pronunciation",), "voice": ("narration", "voice"),
             "speed": ("narration", "speed"), "loudness": ("narration", "loudness_lufs"),
             "model asset": ("narration", "model"), "voice asset": ("narration", "voice_asset"),
-            "width": ("render", "width"), "CRF": ("render", "crf"),
+            "width": ("render", "width"), "CRF": ("render", "crf"), "audio bitrate": ("render", "audio_bitrate_kbps"),
             "template": ("tools", "files", "templates/slide.html"), "tool lock": ("tools", "files", "tools.lock"),
             "media code": ("tools", "files", "pgvideo/render.py"),
         }
@@ -131,6 +133,13 @@ class KeyTests(unittest.TestCase):
                               "pgvideo/timing.py", "pgvideo/render.py", "pgvideo/validate.py"}, set(files))
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / ".runtime/tmp") as empty:
             self.assertIsNone(reuse.stage_fingerprint(Path(empty)))
+
+    def test_stage_defaults_are_the_settings_build_looks_up(self):
+        """`build` keys its lookup with cli's settings; a stage with another default builds a video it never finds."""
+        narration = inspect.signature(narration_module.create_narration).parameters
+        render = inspect.signature(render_module.create_render).parameters
+        self.assertEqual((narration["loudness"].default, narration["peak"].default), (cli.LUFS, cli.TRUE_PEAK))
+        self.assertEqual((render["crf"].default, render["audio_bitrate"].default), (cli.CRF, cli.AUDIO_BITRATE))
 
 
 class StageTests(unittest.TestCase):
@@ -220,6 +229,8 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(self.index(key), [first.name])
         calls, renders = len(self.kokoro.calls), self.slides.call_count
         self.assertGreater(calls, 0)
+        # At 128 kb/s the AAC encoder's noise substitution raised the decoded true peak above validation's limit.
+        self.assertEqual(json.loads((first / "render.json").read_text(encoding="utf-8"))["audio_bitrate_kbps"], 192)
         # A harness video is delivered with its content report, plan, and orchestration record.
         delivery = self.workspace / "output" / first.name
         for name in ("content-report.md", "plan.md", "orchestration.json"):
@@ -355,6 +366,17 @@ class ReuseTests(unittest.TestCase):
                 self.assertEqual(status, 0, stderr)
         self.assertEqual(self.runs(), [first.name])
         self.assertEqual(self.index(self.manifest(first)["reuse"]["key"]), [first.name])
+
+    def test_build_reuses_a_video_rendered_at_192_kbps(self):
+        first, _stdout = self.generate()
+        status, _stdout, stderr = self.run_command("render", "--request", first.name, "--audio-bitrate", "192")
+        self.assertEqual(status, 0, stderr)
+        key, renders = self.manifest(first)["reuse"]["key"], self.slides.call_count
+        # The lookup is keyed at the bitrate the video was delivered with, so `build` does not encode it again.
+        status, stdout, stderr = self.run_command("build", "--request", first.name, "--accept-duration")
+        self.assertEqual(status, 0, stderr)
+        self.assertIn(f"Reuse: request {first.name} has a validated video with the same inputs", stdout)
+        self.assertEqual((self.manifest(first)["reuse"]["key"], self.slides.call_count), (key, renders))
 
     def test_videos_from_other_tools_are_not_registered(self):
         first, _stdout = self.generate()
