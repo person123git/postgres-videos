@@ -1,4 +1,4 @@
-"""Step 12 integration check: real Kokoro audio, from its chunks to the delivered MP4.
+"""Integration check: real Kokoro audio, from its chunks to the delivered MP4.
 
 A three-scene storyboard is narrated with the local Kokoro model, timed, rendered,
 and validated. One hand-written unit is longer than Kokoro's 510-phoneme limit, so
@@ -45,8 +45,7 @@ def save(path: Path, value) -> str:
 
 
 def sentence(identifier: str, text: str, *, manual: bool = False) -> dict:
-    return {"id": identifier, "text": text, "tts": text, "tts_source": "manual" if manual else "dictionary",
-            "citations": []}
+    return {"id": identifier, "text": text, "tts": text, "tts_source": "manual" if manual else "dictionary"}
 
 
 class Recorder:
@@ -103,11 +102,9 @@ class KokoroIntegrationTests(unittest.TestCase):
         # A fresh unit cache inside the fixture makes Kokoro synthesize every unit.
         self.enterContext(patch("pgvideo.narration.CACHE", base.relative_to(ROOT) / "cache"))
         self.enterContext(patch("pgvideo.narration.local_kokoro", return_value=(self.recorder, self.voice)))
-        document = {"title": "Integration check", "path": "wiki/v18/integration.md", "version": 18,
-                    "wiki_commit": "a" * 40, "pinned_commit": "b" * 40,
-                    "url": "https://github.com/example/wiki/blob/" + "a" * 40 + "/wiki/v18/integration.md"}
+        document = {"path": "wiki/v18/integration.md", "version": 18}
         pronunciation = ROOT / "pronunciation/en.yaml"
-        self.storyboard = {"document": document, "pronunciation": {
+        self.storyboard = {"title": "Integration check", "document": document, "pronunciation": {
             "file": "pronunciation/en.yaml", "sha256": hashlib.sha256(pronunciation.read_bytes()).hexdigest(),
             "language": "a"}, "scenes": [
             {"id": "s01-title", "part": "opening", "title": "Integration check",
@@ -123,14 +120,10 @@ class KokoroIntegrationTests(unittest.TestCase):
         ]}
         script = save(self.run_dir / "storyboard.json", self.storyboard)
         save(self.run_dir / "request.json", {
-            "document": {"path": document["path"]},
             "settings": {"voice": "af_heart", "language": "a", "speed": 1.0, "width": 640, "height": 360,
                          "output_dir": str(base / "output")}})
-        save(self.run_dir / "manifest.json", {"script": {"status": "passed", "sha256": script},
-                                              "sources": {"status": "passed"},
-                                              "glossary_check": {"status": "passed"}})
+        save(self.run_dir / "manifest.json", {"script": {"status": "passed", "sha256": script}})
         (self.run_dir / "script.md").write_text("# Integration check\n")
-        (self.run_dir / "glossary-check.md").write_text("# Passed\n")
 
     def test_chunks_pauses_captions_and_the_last_scene_reach_the_mp4(self):
         create_narration(ROOT, self.run_dir)

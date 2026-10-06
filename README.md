@@ -1,23 +1,23 @@
 # pgvideo
 
-pgvideo makes one narrated MP4 from one Markdown page of
-[person123git/postgres-llm-wiki](https://github.com/person123git/postgres-llm-wiki),
-on request. An **LLM harness orchestrates every video**: it plans what to teach,
-writes the narration and storyboard, cross-checks them against the wiki glossary
-and the pinned PostgreSQL source, and has the result reviewed in a separate pass.
-pgvideo supplies the evidence and the media tools. It snapshots the page, the
-glossary, and the PostgreSQL files the page cites; parses the page and extracts
-exact facts; validates every artifact the harness writes and decides the content
-gate; and narrates with a local Kokoro model, times captions and scenes from the
-measured audio, renders slides, and encodes, validates, and delivers the MP4.
-A later request with exactly the same inputs reuses the validated video.
+pgvideo turns a storyboard into a narrated MP4. A storyboard is one JSON file:
+the scenes of a video, with what each screen shows and what is said over it.
+`scripts/pgvideo build` narrates it with a local Kokoro model, times captions
+and scenes from the measured audio, renders the slides, and encodes, checks,
+and delivers the MP4. A later build with exactly the same inputs reuses the
+video.
+
+The videos explain pages of
+[person123git/postgres-llm-wiki](https://github.com/person123git/postgres-llm-wiki).
+**The content is written by an LLM harness** that follows
+[AGENTS.md](AGENTS.md): it downloads the wiki into the request's run directory,
+reads the page, writes a plan and the storyboard, and calls `build`. pgvideo
+does not download or read the wiki, does not plan or review, and does not check
+what a storyboard says. It is the narration and video generation utility, and
+nothing else.
 
 The Python runtime, packages, models, tools, caches, and outputs all stay inside
-this directory, and every pgvideo command runs in a Linux sandbox. The harness
-follows [AGENTS.md](AGENTS.md); [docs/harness.md](docs/harness.md) is its
-command, evidence, and recovery reference. `plan.md` records the design and its
-decisions, and [docs/llm-video-generation-proposal.md](docs/llm-video-generation-proposal.md)
-the rationale for the harness workflow.
+this directory, and every pgvideo command runs in a Linux sandbox.
 
 ## Prerequisites
 
@@ -30,13 +30,11 @@ the rationale for the harness workflow.
   `libudev1`, `libxkbcommon0`, `libx11-6`, `libxcb1`, `libxcomposite1`,
   `libxdamage1`, `libxext6`, `libxfixes3`, and `libxrandr2`; recent releases
   add a `t64` suffix to some of these names. `doctor` names a missing library.
-- **An LLM harness** that can read repository instructions, run local commands,
-  write JSON files, and run a separate review pass in a fresh context (a separate
-  session, subagent, or model invocation without the writer's conversation,
-  reasoning, notes, or self-assessment). The harness brings its own model
-  connection and credentials; pgvideo never calls a model and never sees those
-  credentials. A harness that cannot keep the review separate must
-  say so before production, as `AGENTS.md` requires.
+- **An LLM harness**, to write the content: one that can read repository
+  instructions, read and write files, run local commands, and download the wiki
+  from GitHub with `curl` and `tar`. The harness brings its own model
+  connection and credentials; pgvideo never calls a model
+  and never sees those credentials. A storyboard written by hand works too.
 
 ## Quick start
 
@@ -49,329 +47,167 @@ Then open the repository in your harness and ask for a video:
 
 > Read this project's AGENTS.md and generate a summary video from
 > wiki/v18/questions/observability/track-activity-query-size.md for a PostgreSQL
-> administrator. Aim for three minutes, cross-check the glossary and pinned
-> evidence, and continue through validation and delivery.
+> administrator. Aim for three minutes.
 
-The harness runs `scripts/pgvideo prepare`, writes and imports the plan and the
-storyboard, runs the separate review, and calls `scripts/pgvideo build`. It
-finishes by reporting the delivered files, for example:
+The harness downloads the latest wiki into `runs/<id>/wiki_content/`, reads the
+page there, writes `.scratch/<id>/plan.json` and
+`.scratch/<id>/storyboard.json`, and runs:
+
+```sh
+scripts/pgvideo build --storyboard .scratch/<id>/storyboard.json --request <id> --json
+```
+
+It finishes by reporting the delivered files:
 
 ```text
-output/<request-id>/track-activity-query-size-summary.mp4
-output/<request-id>/transcript.md, captions.srt, captions.vtt, references.md,
-  glossary-check.md, content-report.md, plan.md, orchestration.json,
+output/<id>/track-activity-query-size.mp4
+output/<id>/transcript.md, captions.srt, captions.vtt, references.md,
   quality-report.json, manifest.json
 ```
 
-or an actionable blocker with the saved request ID, such as a glossary conflict
-that needs your decision or a plan that cannot fit the requested length. Ask the
-harness to continue that request later; everything it needs is saved in
-`runs/<request-id>/`.
+Ask the harness to continue a request later; what it wrote is in
+`.scratch/<id>/`, and the wiki it downloaded and the last build are in
+`runs/<id>/`.
 
 ## Commands
 
-Run the scripts in `scripts/` directly; no shell activation is needed. Paths
-given as arguments are resolved from the project root. The harness calls the
-stage commands; you rarely need to, but every one of them can be run by hand.
+Every command runs through `scripts/pgvideo`.
 
-| Command | What it does | Network |
-| --- | --- | --- |
-| `scripts/setup [--offline]` | Provisions the pinned Python runtime, packages, Kokoro model, fonts, FFmpeg, eSpeak NG, and Chromium inside the project, then runs `doctor --sample`. `--offline` rebuilds `.venv/` and `.runtime/` from `cache/` only. | yes, except with `--offline` |
-| `scripts/pgvideo prepare --document <page> [options]` | Creates a request and runs the source snapshot, document parsing, glossary matching and cross-check, and the evidence packet. Stops before any content is written. | yes (GitHub) |
-| `scripts/pgvideo status --request <id>` | Stage statuses, artifacts, unresolved issues, repair budgets, and the legal next steps. | no |
-| `scripts/pgvideo plan --request <id> --file <plan.json>` | Imports and checks the harness's content plan. | no |
-| `scripts/pgvideo script --request <id> --storyboard <file>` | Imports and checks the harness's storyboard. Never starts narration. | no |
-| `scripts/pgvideo review --request <id> --file <review.json>` | Imports the separate semantic review and decides the content gate. | no |
-| `scripts/pgvideo review-input --request <id>` | Writes what the independent reviewer reads to `runs/<id>/review-input/`: the video as text in playback order, the page as text, source-to-video coverage, the warnings left to the review, the plan without writer assessments, and a review template. | no |
-| `scripts/pgvideo preview --request <id>` | Renders every scene's slide and contact sheets for review, without narration and before the content gate. | no |
-| `scripts/pgvideo build --request <id> [--no-reuse] [--accept-duration]` | Narrates, checks measured length, times, renders, and validates an accepted storyboard. Prepares files for final media review, reusing matching media. | no |
-| `scripts/pgvideo media-review --request <id> --file <review.json>` | Imports visual, listening, caption, and MP4 playback checks for the exact video; publishes the final package only when they pass. | no |
-| `scripts/pgvideo resume --request <id>` | Repeats the glossary cross-check with the request's `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review. | no |
-| `scripts/pgvideo replay --request <id> --from <other-id>` | Revalidates another request's accepted content for this request when the evidence, prompts, and review policy match. No new inference. | no |
-| `scripts/pgvideo excerpt --request <id> --path <file> --lines <a>-<b>` | Prints lines of a PostgreSQL file from the request's snapshot with their evidence ID. | no |
-| `scripts/pgvideo omissions-template --request <id> [--plan <file>]` | Prints a `revise` patch that omits, with empty reasons to fill in, every eligible section the plan leaves unaccounted. | no |
-| `scripts/pgvideo revise --from <file> --patch <patch> --out <new.json>` | Applies a small patch to a plan, storyboard, or review input file and writes a new revision. The source file is unchanged. | no |
-| `scripts/pgvideo baseline --request <id>` | Drafts the old extractive script for comparison. It is never narrated or delivered. | no |
-| `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records supplementary observations after validation; does not pass final media review. | no |
+| Command | What it does |
+| --- | --- |
+| `build --storyboard <file> [--request <id>] [options]` | Imports the storyboard, then narrates, times, renders, checks, and delivers it. A new `--request` name starts a request; an existing one is rebuilt in place. Without `--request`, a new request gets a generated ID. |
+| `build --request <id>` | Builds the request's imported storyboard again, for example after an interrupted build. |
+| `narrate --request <id> [--refresh-unit <unit>] [--lufs] [--true-peak]` | Repeats narration, then timing, rendering, and the checks. |
+| `timing --request <id>` | Repeats timing, then rendering and the checks. |
+| `render --request <id> [--crf] [--audio-bitrate]` | Repeats rendering and the checks. |
+| `validate --request <id>` | Repeats the media checks and the delivery. |
+| `doctor [--sample]` | Checks the local environment; `--sample` also makes a short offline narration, slide, and MP4. |
+| `test [--pattern <glob>]` | Runs the test suite in the offline sandbox. |
 
-`scripts/pgvideo test --pattern test_harness.py` runs a focused test file in the same project sandbox.
-| `scripts/pgvideo narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage and the ones after it. The content gate applies. | no |
-| `scripts/pgvideo doctor [--sample]` | Checks the local environment and writes `.runtime/environment-report.json`. `--sample` also narrates, renders, and encodes a short offline sample. | no |
-| `scripts/pgvideo test` | Runs the test suite in the offline sandbox. | no |
-
-`<id>` is the request ID that `prepare` prints; it is also the request's
-directory name under `runs/`. A command given `--request` works on that request
-only and never creates one. `doctor` runs before every `scripts/pgvideo`
-command, and a failed check stops the command. `scripts/pgvideo <command> --help`
-lists a command's options.
-
-The harness-facing commands (`prepare`, `status`, `plan`, `script`, `review`,
-`build`, `review-input`, `preview`, `media-review`, `resume`, `replay`, `excerpt`, `omissions-template`, `revise`, `baseline`, `note`) take `--json`. They
-then print one structured result on standard output, with `request_id`,
-`stage`, `status`, `artifacts`, `issues`, `next_actions`, and a `message`
-([schemas/stage-result.schema.json](schemas/stage-result.schema.json)), and keep
-it as `runs/<id>/last-result.json`. Progress lines go to standard error. `excerpt`
-and `omissions-template` only read, and `revise` writes only the harness's own input
-file, so their results are not kept.
-
-### `prepare` options
+### `build` options
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--document` | required | A repository-relative `.md` path, or an HTTPS GitHub blob URL in `person123git/postgres-llm-wiki`. |
-| `--ref` | `main`, then `master` | The branch, tag, or commit for a relative path. If no `--ref` is supplied, a missing document is retried on `master`. A blob URL uses its own ref; a different `--ref` is rejected. |
-| `--detail` | `standard` | `summary`: the main answer and its qualifications. `standard`: the mechanism and useful examples. `full`: every eligible section, with no duration ceiling. |
-| `--audience` | PostgreSQL users and administrators who know SQL | Who the video is for; the plan and review must keep it. |
-| `--target-minutes` | 3 for `summary`, 8 for `standard`, none for `full` | The duration target. The plan, the script estimate, and the measured narration must stay within ±15%. Rejected with `full`. |
-| `--voice` | `af_heart` | The Kokoro voice. It must be provisioned in `tools.lock`. |
-| `--language` | `a` | The Kokoro language code; `a` is American English. |
-| `--speed` | `1.0` | The speaking speed, a positive number. |
-| `--width`, `--height` | `1920`, `1080` | The video size in pixels, as positive even integers. |
-| `--output` | `output` | The delivery directory, inside the project. The video goes to `<output>/<request-id>/`. |
+| `--storyboard <file>` | the request's imported storyboard | Storyboard file (JSON or YAML) inside the project. |
+| `--request <id>` | a generated ID | The request's name: the directory under `runs/` and `output/`. |
+| `--voice`, `--language`, `--speed` | `af_heart`, `a`, `1.0` | Kokoro voice, language code, and speaking speed. |
+| `--width`, `--height` | `1920`, `1080` | Video size; both must be even. |
+| `--output <dir>` | `output` | Output directory inside the project. |
+| `--no-reuse` | off | Builds the narration and MP4 even when a validated video with the same inputs exists. |
+| `--json` | off | Prints one result as JSON on standard output; progress goes to standard error. |
 
-The tool never chooses a page: each request narrates exactly the page named by
-`--document`. `prepare` checks that the page exists on GitHub before it creates
-the request, and it resolves the ref to one commit for the whole request. It
-downloads `wiki/glossary.md` from that commit for every request and builds the
-request's glossary index from that copy. Set `GITHUB_TOKEN` if GitHub's API rate
-limit blocks a request; unauthenticated clients get 60 API calls an hour, and a
-request uses two to six.
+A request remembers the options it was built with, so a rebuild needs only the
+ones that change.
 
-The other commands' options:
+### Result and exit status
 
-| Command | Option | Default | Meaning |
-| --- | --- | --- | --- |
-| `plan` | `--human-revision` | off | A person revised this plan after pgvideo stopped a repair that was not converging. |
-| `script` | `--storyboard` | none | The harness's version 2 scene file (JSON or YAML) inside the project. |
-| `script` | `--drafter-command` | none | An optional adapter: an executable inside the project that reads `draft-input.json` on standard input and writes the scene file on standard output, offline. |
-| `script` | `--duration-rewrite` | off | One rewrite after a measured duration miss: shorten optional detail when long or expand using unused allowed source content when short. |
-| `script` | `--human-revision` | off | A person revised this storyboard after the two automatic repair rounds were used. |
-| `build`, `script`, `resume` | `--no-reuse` | off | Build the narration and MP4 instead of reusing a validated video. |
-| `build` | `--accept-duration` | off | You accept a measured length outside the target. The harness passes it only when you say so. |
-| `note` | `--kind`, `--text` | required | `visual` or `listening`, and what was checked and found. |
-| `narrate` | `--lufs` | `-16` | Integrated loudness target, from -70 to -5 LUFS. |
-| `narrate` | `--true-peak` | `-1.5` | Maximum true peak, from -9 to 0 dBTP. |
-| `narrate` | `--refresh-unit` | none | Synthesize a unit or sentence again even though it is cached, such as `s01-title.n1.u1`. Repeat the option for several. |
-| `render` | `--crf` | `20` | H.264 constant rate factor, from 0 to 51; lower is higher quality. |
-| `render` | `--audio-bitrate` | `192` | Opus bitrate, from 32 to 256 kb/s. |
+With `--json`, `build` prints:
 
-### Exit status
-
-| Status | Meaning |
-| --- | --- |
-| 0 | The stage passed, the video was validated and delivered, or the `setup`, `doctor`, or `test` check passed. |
-| 1 | An execution error, such as an invalid request or file, a missing local dependency, a failed download, an input that changed after it was checked, a refused content gate, or broken media. The message says what failed. |
-| 2 | Invalid command-line arguments. |
-| 3 | `needs_review`: the stage ran and found issues that need a repair or a decision. |
-
-## How a request flows
-
-```text
-prepare: snapshot → parse → glossary match → cross-check → evidence packet
-harness: content plan → plan checks → storyboard → storyboard checks → separate review → content gate
-build:   Kokoro narration → measured-length check → timing → slides and MP4 → validation
-review:  every scene visually + all narration + captions + complete MP4 playback → delivery
+```json
+{"request_id": "…", "stage": "validation", "status": "completed", "issues": [],
+ "duration_seconds": 184.3,
+ "delivery": {"directory": "…/output/<id>", "video": "…/output/<id>/<page>.mp4",
+              "files": [{"path": "…", "sha256": "…"}]},
+ "message": "Delivered …"}
 ```
 
-1. **Evidence.** `prepare` writes `runs/<id>/evidence-packet.json`: every section
-   eligible for narration with stable sentence and row IDs, tables, code, and
-   caveat flags; the candidate glossary entries with their version scope; excerpts
-   of the cited PostgreSQL lines at the pin, each with an evidence ID and SHA-256;
-   the configuration facts parsed from the pinned GUC table; and the cross-check's
-   conflicts, corrections, and resolutions.
-2. **Plan.** The harness chooses the main answer, the claims to teach in order,
-   the caveats that must survive, a time budget per part, and a reason for each
-   section it leaves out, and assesses every claim against its evidence.
-   pgvideo checks every ID, the coverage of eligible sections, Step 6
-   corrections, and the budget, and records the plan in `plan.json` and
-   `plan-report.md`.
-3. **Storyboard.** The harness writes the scenes for speech. Every factual
-   sentence names its plan claims and evidence; every diagram edge names the
-   claims behind its direction. pgvideo rechecks names, numbers, versions, and
-   configuration facts against the snapshot, checks screens, code, tables, and
-   edge direction, and estimates the length at the Kokoro rate measured on this
-   machine. `script.md` shows the result; its checks are labeled lexical.
-4. **Review.** A separate pass reads the files that `review-input` writes, which leave out the writer's claim
-   assessments: the whole video as text in playback order, the page, and what no scene cites. It first judges
-   the video as a whole (eight `overall` checks, editorial findings, coverage), looking at the slides that
-   `preview` renders. It then judges every narration item, screen heading and line, diagram
-   edge, and hand-written TTS text as supported, contradicted, or lacking
-   evidence. pgvideo accepts the review only for the
-   exact current storyboard and plan, writes `content-review.json` and
-   `content-report.md`, and opens the content gate only when every factual target
-   is supported and nothing is material. It also reviews diagram nodes, code/table excerpts and glossary cards,
-   and checks source-to-video coverage for every eligible section, including content missing from the plan.
-5. **Media.** `build`, and every media command, refuses without the gate. It
-   narrates, compares the measured length with the target, and then times,
-   renders, and validates a prepared package under `runs/<id>/delivery/`.
-6. **Finished-video review.** Every scene requires actual visual, listening, and caption checks, followed by
-   complete MP4 playback for pacing, transitions, synchronization, and ending. `media-review` binds this report
-   to the exact MP4 hash and publishes the package only when every required check passes. Missing tools or
-   unavailable checks are reported and block delivery.
+| Status | Exit | Meaning |
+| --- | --- | --- |
+| `completed` | 0 | The video and its files are delivered. |
+| `needs_review` | 3 | Narration or rendering cannot handle something in the storyboard (`stage` is `storyboard`, with `issues`), or a media measurement is outside its limits (`stage` is `validation`; see `runs/<id>/quality-report.json`). |
+| `failed` | 1 | An error, such as a storyboard that does not match its schema, a slide whose content overflows, or a missing local tool. `stage` names where it stopped. |
 
-Old requests, made before this workflow, keep their extractive provenance: they
-are not relabeled, and `resume`, `script`, and the media commands replay them
-as before. `baseline` produces the same extractive script for any request as a
-comparison.
+A result folds more than three issues of one code into one issue with a `count`,
+the first messages as `examples`, and the scenes it names;
+`runs/<id>/script.md` lists each one.
+
+## The storyboard
+
+[schemas/storyboard.schema.json](schemas/storyboard.schema.json) is the format,
+and [prompts/draft.md](prompts/draft.md) says how to write one.
+
+```json
+{
+  "schema": "pgvideo/storyboard/v3",
+  "title": "How track_activity_query_size is used",
+  "document": {"path": "wiki/v18/questions/observability/track-activity-query-size.md", "version": 18},
+  "scenes": [
+    {"id": "answer", "part": "answer", "title": "Short answer",
+     "screen": {"layout": "bullets", "heading": "Short answer",
+                "lines": ["`track_activity_query_size` sets the slot size"]},
+     "narration": [{"text": "`track_activity_query_size` sets the size of each slot.",
+                    "origin": "document", "sources": ["Short Answer"]}],
+     "citations": [{"text": "guc_tables.c", "url": "https://…"}]}
+  ]
+}
+```
+
+- `title` and `document` describe the video. Every slide shows the PostgreSQL
+  version above its heading and the page's path in its footer.
+- A scene is one screen held while its narration plays. Its `screen` has a
+  `layout` (`title`, `question`, `bullets`, `steps`, `code`, `table`,
+  `diagram`, `terms`, `image`, or `credits`) and that layout's content. An
+  `image` names a file inside the project by its path from the project root,
+  such as a figure under `runs/<id>/wiki_content/`.
+- A narration item's `text` is what the captions show, with code in backticks.
+  pgvideo derives the spoken text from `pronunciation/en.yaml`; an item may
+  carry its own with `tts` and `tts_source: "manual"`.
+- `origin`, `sources`, and `citations` say where the content comes from. They
+  appear in the transcript and the references; pgvideo does not check them.
+
+Importing a storyboard checks only what narration and rendering depend on:
+
+| Issue | Severity | Meaning |
+| --- | --- | --- |
+| `unspeakable_tts` | blocking | The spoken text has a symbol Kokoro would read aloud or drop. Add a pronunciation or write the item's `tts`. |
+| `diagram_edge` | blocking | An edge names a node the diagram does not have. |
+| `missing_image` | blocking | A slide image is not an image file inside the project. |
+| `dense_screen`, `long_line`, `long_heading`, `long_code`, `wide_code`, `dense_table` | warning | A screen may be hard to read. The renderer stops only when content does not fit the slide. |
+| `empty_screen` | note | A bullets, steps, or question screen has no lines. |
+
+## The plan
+
+[schemas/plan.schema.json](schemas/plan.schema.json) is the format of the plan
+a harness writes before the storyboard, and [prompts/plan.md](prompts/plan.md)
+says how to write one. It records the request (document, audience, detail, and
+duration), the main answer, the claims in teaching order, the caveats, the
+time budgets, and the omissions. No pgvideo command reads a plan. Its format is
+fixed so that a later session, or another harness, can continue from the file.
 
 ## Common tasks
 
 ### Make a video
 
-Ask your harness, naming one page and anything that matters to you:
-
-> Read AGENTS.md and make a standard video of
-> wiki/v18/questions/observability/track-activity-query-size.md for developers
-> new to PostgreSQL monitoring, about eight minutes.
-
-To prepare a request yourself and hand it to a harness later:
+Ask the harness; see [Quick start](#quick-start). To build a storyboard you
+wrote yourself:
 
 ```sh
-scripts/pgvideo prepare --document wiki/v18/questions/observability/track-activity-query-size.md --detail summary
-scripts/pgvideo status --request <id>
+scripts/pgvideo build --storyboard path/to/storyboard.json --request my-video
 ```
 
-### Choose how much detail and how long
+### Change a video
 
-| Level | What the harness plans | Default target |
-| --- | --- | --- |
-| `summary` | The main answer and the qualifications it needs. | 3 minutes |
-| `standard` (default) | The mechanism and the page's useful examples, within the target. | 8 minutes |
-| `full` | Every eligible section, with its tables, code, and figures. | none |
+Edit the storyboard and run the same `build` command again. The request is
+rebuilt in place. Sentences whose spoken text did not change reuse their cached
+audio, so only the changed ones are synthesized.
 
-`--target-minutes` sets another target. Mandatory content and a strict target can
-conflict; the harness then reports an infeasible plan instead of dropping a
-caveat or overrunning. The level, audience, and target belong to the request; for
-another level of the same page, prepare a new request. A summary is delivered as
-`<page>-summary.mp4` and full detail as `<page>-full.mp4`.
-
-### Continue or revise a request
-
-Ask the harness to continue request `<id>`; it starts from `status`. To revise,
-say what to change: "shorten the terminology scene of request `<id>`" or "the
-review missed that the setting needs a restart; fix it." The harness writes a new
-storyboard, reviews it again, and builds; unchanged narration comes from the
-audio cache. What stops a request and what happens next:
-
-| Stopped at | Report | What to do |
-| --- | --- | --- |
-| Source snapshot or document | `source-report.md`, `coverage.md` | The wiki page needs a fix, such as a version conflict or missing evidence. Fix the page, then prepare a new request. |
-| Glossary cross-check | `glossary-check.md` | Decide each blocking issue and record it in `runs/<id>/resolutions.yaml` (the report gives a snippet for each), then ask the harness to resume, or run `scripts/pgvideo resume --request <id>`. The harness may propose a resolution, but only you record it. |
-| Plan | `plan-report.md` | The harness fixes what it can, with a patch (see below). An infeasible plan, a contradicted claim, or missing evidence is reported to you: change the target or detail, or accept the omission. A repair that does not converge is stopped and reported too: after three imports in a row with the same blocking issue, or ten in a row without a pass. |
-| Storyboard | `script.md` | The harness patches the named issues into a new revision and imports it. |
-| Content review | `content-report.md` | The harness gets two repair rounds; then it reports the remaining findings for your decision. |
-| Measured length | `status` | One rewrite of optional detail; then you may accept the length (`build --accept-duration`). |
-| Media validation | `quality-report.json` | The media is valid, but loudness or silence is out of range. Repeat the narration with other settings, or revise the script. |
-
-### Read the evidence packet
-
-No command serves the evidence packet. The harness opens
-`runs/<id>/evidence-packet.json` and reads it. The file is indented JSON whose
-keys are in reading order: `document`, `request`, and `speech`; `sections`, in
-page order; `glossary`; `evidence`; `review_state`; and `digests`.
-
-The harness plans in three passes. It must first understand the whole document:
-it reads `document`, `request`, `review_state`, and every section in full, and
-does not select content until it can state the page's question and answer, what
-each section adds, which facts repeat, and which qualifications and corrections
-apply. If it cannot, it stops and reports. It then selects content, and reads the
-evidence and glossary entries for the content it keeps. `AGENTS.md` requires
-this as execution rule 5. After an interruption, `status` identifies the next
-workflow stage.
-
-To return to one entry, the harness selects it by ID:
+### Continue an interrupted build
 
 ```sh
-P="runs/<id>/evidence-packet.json"
-jq '{document, request, speech, review_state, digests}' "$P"         # what the plan copies, and the review state
-jq --arg s "short-answer" '.sections[] | select(.id == $s)' "$P"      # one section
-jq --arg s "short-answer" '.evidence.excerpts[] | select(any(.cited_by[]; . == $s or startswith($s + ".")))' "$P"
-jq --arg e "guc:track_activity_query_size" '.evidence | (.excerpts[], .settings[]) | select(.id == $e)' "$P"
-jq --arg t "GIN" '.glossary | (.entries[], .ambiguous[]) | select(.term == $t)' "$P"
+scripts/pgvideo build --request <id>
 ```
-
-### Repair a plan or storyboard with a patch
-
-A repair changes a few values, so the harness never types a plan, storyboard, or
-review again: a whole file can be longer than a small model's output limit, and a
-call cut off at the limit writes nothing. It writes a short patch and `revise`
-applies it to a new revision. The source file is unchanged, the new file must not
-exist, and nothing is written unless every operation matches:
-
-```sh
-scripts/pgvideo revise --from .scratch/<id>/plan.v1.json --patch .scratch/<id>/fix1.json --out .scratch/<id>/plan.v2.json --json
-scripts/pgvideo plan --request <id> --file .scratch/<id>/plan.v2.json --json
-```
-
-```json
-[
-  {"op": "replace", "path": "claims[*].sources[*]", "find": "_", "with": "."},
-  {"op": "set", "path": "claims[id=size-sets-slot].kind", "value": "answer"},
-  {"op": "add", "path": "omissions", "value": {"section": "details", "reason": "Beyond a summary."}},
-  {"op": "remove", "path": "claims[id=old-claim]"}
-]
-```
-
-| Operation | Effect |
-| --- | --- |
-| `set` with `value` | Puts the value at the path. The last key may be new. |
-| `add` with `value` or `values` | Appends to the list at the path. |
-| `remove` | Deletes the entries or keys at the path. |
-| `replace` with `find` and `with` | Replaces literal text in the strings at the path. |
-
-A path is keys joined by dots. After a list, a selector in brackets picks entries:
-`[2]` a position, `[*]` every entry, `[id=size-sets-slot]` the entries whose key
-has that value, and `[=short-answer.1.s1]` the entries equal to a value.
-
-For a long page, the harness does not type the omission list either.
-`omissions-template` prints a patch that omits every eligible section a
-plan neither selects nor omits, each with an empty reason; the harness applies it
-and then sets the reasons. The plan schema rejects an empty reason. The question
-and the page's own summary cannot be omitted, so the template lists them under
-`essential`:
-
-```sh
-scripts/pgvideo omissions-template --request <id> --plan .scratch/<id>/plan.v1.json > .scratch/<id>/omit.json
-scripts/pgvideo revise --from .scratch/<id>/plan.v1.json --patch .scratch/<id>/omit.json --out .scratch/<id>/plan.v2.json --json
-```
-
-Results stay small for the same reason. When more than three issues share a
-severity and code, the result holds one issue with a `count`, the first three
-messages as `examples`, and the claims, sections, or scenes they name; schema
-violations of one rule in many list entries are one line. The stage's record and
-report (`plan-report.md`, `script.md`, `content-report.md`) keep every issue. If a
-session on a small model ends while repairing, look for a response that stopped
-at the output limit; the fix is a patch, not a higher limit.
 
 ### Fix a pronunciation
 
-Edit `pronunciation/en.yaml`, then ask the harness to re-import the request's
-storyboard (`runs/<id>/authored/storyboard.json`) and build. A sentence can also
-carry hand-written TTS text with `tts_source: manual`; the review checks it
-against the display text. To synthesize one unit again without changing it:
+Edit `pronunciation/en.yaml`, then build the storyboard again. A sentence can
+also carry hand-written TTS text with `tts_source: manual`. To synthesize one
+unit again without changing it:
 
 ```sh
-scripts/pgvideo narrate --request <id> --refresh-unit s03-terms.n2.u1
+scripts/pgvideo narrate --request <id> --refresh-unit answer.n2.u1
 ```
 
 Unit IDs are listed in `runs/<id>/narration/audio-map.json`.
-
-### Use an updated glossary
-
-Commit the change to `wiki/glossary.md` in the wiki, then prepare a new request
-with a ref that contains it, such as the default `main` (with `master` as a fallback). Every `prepare`
-downloads the glossary at the resolved commit; `resume` and the other
-`--request` commands keep the glossary their request downloaded. A changed
-glossary changes the evidence digest, so accepted content is not replayed and
-the video is not reused.
-
-### Replay accepted content
-
-When `prepare` finds an earlier request whose accepted plan, storyboard, and
-review were made from the same evidence, prompts, schemas, and review policy, it
-lists it as `replay_available`. `scripts/pgvideo replay --request <id> --from
-<earlier-id>` imports those exact files through the same validators, with no new
-inference; the orchestration record says so and never claims a new generation.
 
 ### Re-encode, deliver again, or build instead of reusing
 
@@ -380,14 +216,6 @@ scripts/pgvideo render --request <id> --crf 18
 scripts/pgvideo validate --request <id>
 scripts/pgvideo build --request <id> --no-reuse
 ```
-
-### Replay an older request
-
-Requests made before the harness workflow have no plan or review. Their
-original commands still work: `scripts/pgvideo resume --request <id>` repeats
-the cross-check and the extractive script with the drafter the request used, and
-`script --request <id> [--storyboard <file>]` redrafts or imports an edited copy
-of its `storyboard.json`. They are never relabeled as LLM-generated.
 
 ### Check the environment
 
@@ -402,10 +230,10 @@ scripts/pgvideo test               # unit and integration tests
 Model inference happens in the harness, outside pgvideo's sandbox, with the
 harness's own credentials; the project sandbox does not contain the harness.
 pgvideo's commands run in the sandbox: `setup` downloads the locked runtime and
-models, `prepare` reads GitHub (the wiki and the PostgreSQL mirror), and every
-other command, including narration, rendering, and all validation, runs with IP
-connections denied. No pgvideo command calls a model or receives inference
-credentials; `--drafter-command` adapters run offline too. See
+models, and every other command, including narration, rendering, and the media
+checks, runs with IP connections denied. No pgvideo command calls a model,
+receives inference credentials, or downloads the wiki: the harness downloads the
+wiki itself, with `curl`, before it writes anything. See
 [Containment](#containment).
 
 ## Troubleshooting
@@ -413,15 +241,11 @@ credentials; `--drafter-command` adapters run offline too. See
 | Symptom | Cause and fix |
 | --- | --- |
 | The harness does not follow the workflow | Tell it to read `AGENTS.md`; not every harness loads it automatically. |
-| "not a separate review" | Use a fresh session, subagent, or model invocation with no writer conversation, reasoning, notes, or self-assessment. Changing the model alone is insufficient. Report it if this separation is unavailable. |
-| The model is unavailable, or credentials or quota ran out | Progress is saved. Fix the harness's model access and ask it to continue the request; `status` shows where it stopped. |
-| "does not match schemas/…" | The harness wrote malformed JSON or included fields pgvideo computes, such as statuses. It patches the file into a new revision with `revise`. One rule broken in many entries is reported as one line. |
-| A session on a small model ends in the middle of a repair, with nothing written | The response stopped at the model's output limit while retyping a file. Tell the harness to repair with a patch and `scripts/pgvideo revise` (see [Repair a plan or storyboard with a patch](#repair-a-plan-or-storyboard-with-a-patch)). |
-| "insufficient_evidence" or "missing evidence" | A claim needs a file or range that is not in the pinned snapshot. The claim is left out, or you decide what to do; pgvideo never substitutes other documentation. |
-| "made from other evidence", "reviews another storyboard" | A file is stale: a stage before it changed. Write it again from the current files; `status` lists the digests. |
-| The repair budget is used, or a plan repair was stopped | The remaining findings need your decision; a revision you make is imported with `--human-revision`. |
-| The measured length misses the target | The harness rewrites optional detail once; then you accept the length or change the target in a new request. |
-| Media checks failed | See `quality-report.json`; repeat the media stage. Content is not regenerated. |
+| "does not match schemas/storyboard.schema.json" | The storyboard is malformed or includes fields pgvideo computes, such as statuses or sentence IDs. One rule broken in many scenes is reported as one line. |
+| `unspeakable_tts` | Add the term to `pronunciation/en.yaml`, or give the sentence its own `tts` with `tts_source: manual`. |
+| "Slide … has overflow, cropped content, or a missing image" | The scene's content does not fit one slide. Split the scene or shorten its lines, code, or table. |
+| "Encoded audio loudness is outside delivery limits" | See `runs/<id>/quality-report.json`. Do not lower the audio bitrate: below 192 kb/s the encoder adds more to the true peak. |
+| The video is too long or too short | The result's `duration_seconds` is the measured length. Change the storyboard and build again. |
 | Command fails before starting | `scripts/pgvideo doctor` names the missing or changed local dependency; `scripts/setup --offline` restores it. |
 | "native dependency is missing" names a system library | Headless Chromium links to it. Install the distribution package that provides it; see [Prerequisites](#prerequisites). |
 | "project containment cannot be enforced" | The kernel is older than 6.7 or has Landlock disabled. Commands fail rather than run unconfined; see [Containment](#containment). |
@@ -430,17 +254,16 @@ credentials; `--drafter-command` adapters run offline too. See
 
 | Location | Contents |
 | --- | --- |
-| `runs/<id>/` | One request: `request.json`, `orchestration.json`, its read-only inputs, `evidence-packet.json`, `plan.json`, `storyboard.json`, `content-review.json`, the exact files the harness submitted in `authored/`, the reviewer's inputs in `review-input/`, each imported review in `reviews/`, slide previews in `preview/`, every stage's record and report, `last-result.json`, audio, slides, and the draft MP4. It is kept after delivery so any stage can be repeated. |
-| `output/<id>/` | The reviewed delivery: `<page>.mp4` (`<page>-summary.mp4` or `<page>-full.mp4` for those levels), `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `glossary-check.md`, `content-report.md`, `plan.md`, `media-review.json`, `orchestration.json`, `quality-report.json`, and `manifest.json`. |
-| `cache/` | Downloads and reusable results: source files by commit, narration units, validated videos in `cache/videos/`, and accepted harness content in `cache/content/`. |
+| `.scratch/<id>/` | What the harness writes for a request: `plan.json`, `storyboard.json`, and its notes. Not committed. |
+| `runs/<id>/wiki_content/` | The request's copy of the wiki, downloaded by the harness when the request starts: `glossary.md`, `versions.md`, and one `vNN/` directory per PostgreSQL version. |
+| The rest of `runs/<id>/` | One request's build: `request.json` (its settings), `manifest.json` (stage records), `storyboard.json` (the imported storyboard with spoken text), `script.md`, audio, captions, slides, the draft MP4, and `quality-report.json`. It is kept after delivery so any stage can be repeated. |
+| `output/<id>/` | The delivery: `<page>.mp4`, `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `quality-report.json`, and `manifest.json`. |
+| `cache/` | Downloads and reusable results: narration units in `cache/narration/` and validated videos in `cache/videos/`. |
 | `.runtime/` | The local Python runtime, FFmpeg, eSpeak NG, Chromium, temporary files, and `environment-report.json`. |
-| `AGENTS.md`, `prompts/`, `schemas/`, `docs/harness.md` | The harness runbook, its phase prompts, the versioned JSON Schemas, and its reference. |
+| `AGENTS.md`, `prompts/`, `schemas/` | The harness's instructions, how to write the plan and the storyboard, and their formats. |
 
-`manifest.json` holds the stage statuses, which only pgvideo writes;
-`orchestration.json` records the instruction version and hash, prompt and schema
-hashes, what the harness reported about itself and its model (unreported values
-are marked unavailable), repair rounds, and media checks. Deleting a request's
-directory under `runs/` is safe; its video and content can no longer be reused.
+Deleting a request's directory under `runs/` is safe; its video can no longer
+be reused, and continuing the request downloads the wiki again.
 
 ## How it works
 
@@ -473,7 +296,7 @@ both, and neither can be removed.
 
 | Command | Network | File access outside the project |
 | --- | --- | --- |
-| `setup`, `prepare` | allowed | denied except the operating system paths below and the resolver configuration |
+| `setup` | allowed | denied except the operating system paths below and the resolver configuration |
 | `setup --offline`, `doctor`, `test`, and every other `scripts/pgvideo` command | IP sockets denied | denied except the operating system paths below |
 
 Sandboxed processes may open files and list directories only inside the
@@ -491,7 +314,7 @@ project and in:
 - `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/tty`, and
   `/dev/pts`.
 
-`setup` and `prepare` may also read `/etc/resolv.conf`, `/run/systemd/resolve`,
+`setup` may also read `/etc/resolv.conf`, `/run/systemd/resolve`,
 `/etc/hosts`, `/etc/nsswitch.conf`, `/etc/host.conf`, and `/etc/gai.conf` to
 resolve host names. Processes may write only inside the project and to
 `/dev/null` and terminals. They may execute only project files, `/bin/sh`,
@@ -541,7 +364,7 @@ the project or the system library directories. Outputs stay in `.runtime/tmp/`.
 Doctor writes `.runtime/environment-report.json` with the resolved paths,
 versions, sandbox profile, probe results, the last sample result for the
 current locks and scripts, operating system requirements, and limitations.
-Each request copies this snapshot into its `manifest.json`. Explicit
+Explicit
 `GITHUB_TOKEN`, `HF_TOKEN`, and proxy settings may pass to child processes;
 they are not saved in reports.
 
@@ -574,489 +397,41 @@ The Python archive download, extraction, and `.venv/` creation in
 `/usr/bin/uname`, `/usr/bin/curl`, `/usr/bin/sha256sum`, `/usr/bin/tar`, and
 `/usr/bin/env` by absolute path.
 
-### Requests
-
-Each `prepare` creates a new request ID of the form
-`YYYYMMDDTHHMMSSZ-<12 hex>` and saves the normalized request as
-`runs/<request-id>/request.json`, regardless of the working directory. The
-request records the page, the requested ref, the settings (including the
-audience and duration target), and its workflow: `harness`, with the version and
-SHA-256 of the `AGENTS.md` it started under. `orchestration.json` starts at the
-same time with the prompt and schema hashes. A request without a workflow record
-was made before the harness workflow and keeps its extractive provenance. Relative output
-paths are resolved from the project root, and absolute paths must also stay
-inside it. The output and `runs/` paths are checked for traversal and symlink
-escapes before any GitHub access and again before anything is written. Width
-and height must be positive even integers for H.264 encoding, and the voice and
-language must be provisioned locally; only `a`/`af_heart` is provisioned now.
-
-### Source snapshot
-
-After saving the request, `prepare` resolves the requested ref to a full wiki
-commit SHA once. It reads the document and `wiki/glossary.md` from that same
-commit, so a branch that moves during the request cannot mix versions. The
-wiki's cited `raw/postgres-NN/` checkouts are not in its repository. They are
-retrieved from `postgres/postgres`, GitHub's mirror of the upstream
-repository, at the document's `pinned_commit`. `git.postgresql.org` is not used
-because it rate-limits automated downloads. Nothing is read from another
-checkout or a shared Git cache.
-
-Every file is checked against its Git blob ID in the commit's tree. Downloads
-are cached by commit and path under
-`cache/sources/<owner>/<repository>/<commit>/`, and a cached file that fails
-the check is downloaded again. The glossary is the exception: every request
-downloads it again, even when the cache already holds it for that commit, so
-no request depends on a copy that another request downloaded. If that download
-fails or does not match the commit, the request fails. The run directory
-receives:
-
-| File | Contents |
-| --- | --- |
-| `inputs/wiki/`, `inputs/postgres/` | Read-only copies of the document, glossary, images stored in the wiki, `configure.ac` (or `configure.in` for 12), and each cited source file |
-| `sources.json` | Wiki commit, front matter, title, headings, every link resolved against the document's location with its line number, glossary source pins, and the size, SHA-256, and Git blob ID of each input |
-| `source-report.md` | Status, blocking issues with the action needed, warnings, notes, and an input table with commit-specific links |
-| `manifest.json` | The environment snapshot, plus the wiki commit and PostgreSQL source commit kept as separate fields, and the hashes of every input |
-
-These problems block the request before narration, and the command exits
-with status 3 (`needs_review`):
-
-- a front matter `version` that disagrees with the `wiki/vNN/` path, or no version at all;
-- citations into another version's `raw/postgres-NN/` tree;
-- a missing, malformed, or nonexistent `pinned_commit`, or one whose `configure.ac` reports another major version;
-- no citations into the document's own source tree;
-- a cited file or line range that does not exist at the pin, unless the citation appears only under
-  Contents, Context Reviewed, Source References, or Navigation, in which case it is a warning;
-- a missing or unreadable glossary, unreadable front matter, or a document that is not UTF-8.
-
-Broken in-page anchors, glossary anchors, and wiki links are warnings. A
-glossary checked at a different pin for the document's version, or with no
-row for it, is also a warning. The report notes when the document or the
-glossary declares `verified: false`. A network, integrity, or path failure
-marks the manifest `failed` and exits with status 1. The run keeps the files
-saved before the failure.
-
-A request makes one GitHub API call to validate a relative path (a blob URL
-may need one per possible ref/path split) and one to resolve the ref. It also
-makes two for each wiki or PostgreSQL commit not yet cached, so a request
-needs two to six API calls. File contents come from
-`raw.githubusercontent.com`, which does not count against the API limit. Unauthenticated clients get 60 API calls an hour; set
-`GITHUB_TOKEN` for more.
-
-### Document structure and coverage map
-
-When the snapshot passes, `prepare` parses the snapshot copy of the document.
-It checks the copy's SHA-256 first and makes no network requests. For a harness
-request, extraction is kept apart from editorial selection: the coverage map in
-`document.json` marks every section with narratable content as eligible (the
-full-detail rules below), and the harness's plan decides what is said. The map
-the rules below make for the requested level is kept as `static_coverage` for
-regression comparison and for `baseline`; `coverage.md` says which mode it
-shows. The run
-directory receives:
-
-| File | Contents |
-| --- | --- |
-| `document.json` | Every section, block, and sentence with a stable ID and its lines in the original file; every link with the sentence that holds it and a commit-specific URL; the extracted subject, conclusions, terms, quantities, version mentions, examples, and open questions; and the coverage map |
-| `coverage.md` | The coverage decision and reason for each section, the question, the conclusions, mentions of other PostgreSQL versions, the maintenance text left out of the narration, and linked wiki pages that the video does not cover |
-
-Section IDs are the page's GitHub heading anchors, such as `short-answer`.
-Block IDs extend them by position, such as `short-answer.2` or
-`how-it-works.1.2.1` for a list item, and sentences add `.s1`, `.s2`, and so on.
-Editing one section does not change the IDs in another.
-
-Each sentence keeps display text, with inline code in backticks, and spoken
-text. Both drop citation links; the sentence records them by link ID instead.
-Spoken text also drops bare URLs. It is null for text that is never narrated:
-
-- maintenance text such as `Follow AGENTS.md.` and prompt-hygiene notes;
-- `Contents`, `Navigation`, and `Related Pages`;
-- `Context Reviewed`, `Evidence Map`, and `Source References`;
-- HTML.
-
-Front matter is recorded as metadata, not as blocks.
-
-A term is a setting when the cited `guc_tables.c` (`guc.c` in older versions),
-`guc_parameters.dat`, or `postgresql.conf.sample` at the pinned commit defines
-it. Without one of those files, the setting classification is only a hint and
-is marked `setting_source: context`. Quantities keep their units and exclude
-versions, dates, commit hashes, and labels such as "rule 2".
-
-The coverage map estimates narration at 150 words per minute, plus 25 words
-for each code block or image shown on screen. A table counts the words of its
-rows, since the drafter reads each row aloud. The target is 6–10 minutes. When
-the narratable text fits, every section is explained. For longer pages:
-
-- the question and open questions are explained when short and summarized when long;
-- a summarized section keeps its lead and most relevant sentences; a section
-  that is only a table keeps the table's first rows, and one with only code or
-  a figure is explained if it fits and omitted otherwise;
-- sections about limitations, edge cases, or restrictions are always summarized at least;
-- sections that use the question's or conclusions' terms are explained first;
-- tests, history, and measurement detail are the first to be omitted;
-- the measurement script is omitted, and navigation and reference lists are excluded.
-
-Omitted sections remain in the references. A page with no narratable prose
-stops with `needs_review` and exit status 3.
-
-These are the rules of the `standard` level. The other levels of
-[`--detail`](#choose-how-much-detail) change them:
-
-- `full` explains every section except the measurement script and the
-  navigation and reference lists, including long questions and follow-up
-  prompts. It has no length target; a plan over 10 minutes gets a note.
-- `summary` plans about 3 minutes (1–3 minutes at 150 words per minute). It
-  keeps the central question, or its first sentence when it is longer than 150
-  words; the page's own summary, including a Short Answer or Answer Up Front
-  under `## Answer`, as prose without its tables and code; and, when the page
-  has no summary section, the conclusions that open its answer. It also keeps
-  the first sentence of each caveat section and the first open question, or
-  all of that question when it has at most 80 words. It then adds the first
-  sentence of other sections while they fit: main sections before their
-  subsections, then sections that use the subject's terms, in page order, and
-  then the other open questions. Follow-up prompts, tests, history, and other
-  supporting detail, including subsections of such sections, are left out. A
-  first sentence is the section's first narrated sentence that has at least
-  three words and does not end with a colon. The coverage map records the
-  sentences a summary keeps for each section it reduces, and `coverage.md`
-  lists them.
-
-### Glossary matches
-
-When the document passes, `prepare` indexes the glossary that the source
-snapshot downloaded for this request and matches the document against it,
-without network access. It first checks `document.json` and the glossary's
-snapshot copy against their recorded SHA-256 values. Every request builds its
-own index and saves it as `runs/<id>/glossary-index.json`; an index built for
-another request is never used, even for the same glossary. The command prints
-the index's path and entry count, and the manifest records its path, SHA-256,
-build time, and a digest of the parsing code and English lexicon that built it.
-
-Each index entry keeps the entry's heading anchor, term, aliases, checked
-versions, definition, version notes, Related entries, and evidence links, with
-PostgreSQL URLs from the glossary's own Source Pins. Aliases marked
-`(contrast)` name a contrasting concept, and aliases such as
-`stats collector (PostgreSQL 12 and 14)` apply only to those versions.
-
-Candidates come from glossary links in the document and from entry names,
-aliases, acronyms, and identifiers in its headings, narrated sentences, tables,
-and code. Matching respects identifier and word boundaries: `pg_am` does not
-match `pg_amop`, and `HOT` does not match "hot" or "HOTEL". Some forms need
-context before they count:
-
-- ordinary English words such as "path", "cost", or "row" (words in Kokoro's
-  English pronunciation lexicon, so jargon such as "autovacuum" does not);
-- words and code values of three characters or fewer, and two-letter acronyms;
-- code values such as `auto`, which must also be marked as code in the document.
-
-Context comes from the glossary itself: a source file that the paragraph and
-the entry both cite, a symbol from the entry's definition, an entry related to
-it that is already matched in the paragraph, a link to the entry, or another
-distinctive form of the entry in the same section. A word without context
-follows the entry that the same word matched elsewhere in the document; code
-values do not. Otherwise the occurrence is ambiguous, and so is a form that
-several entries share when neither has more support.
-
-The run directory receives `glossary-matches.json`:
-
-| Field | Contents |
-| --- | --- |
-| `matches` | Each matched entry, ranked `central` (title, question, or conclusions), `supporting`, or `peripheral`, with every occurrence's sentence ID, line, method, and supporting evidence, the definition, and its version scope |
-| `ambiguous` | Occurrences that need context or match several entries, with each candidate entry |
-| `unmatched` | Settings, functions, identifiers, and other concepts in the document that no entry covers |
-| `subject` | The subject's focus terms mapped to entries |
-| `issues` | Version and coverage findings for the cross-check |
-
-The version scope applies the entry's own rules for the document's version:
-the main paragraph, a `Holds` note (with any exceptions it names), a `Differs`
-or `Not present` note, or `unchecked` when the entry was not checked on that
-version. A note that refers to another, such as "as in 18", includes that
-note. Step 5 does not stop the request; the cross-check decides which
-ambiguities and gaps need review.
-
-### Glossary cross-check
-
-When the glossary matches pass, `prepare` cross-checks the document without
-network access or a language model. It first checks `document.json` and
-`glossary-matches.json` against the SHA-256 values in the manifest. It reads
-the cited PostgreSQL files and `configure.ac` from the run's verified snapshot
-copies. The glossary declares `verified: false`, so agreement with it is only
-a consistency result. Narrated claims must rest on the document's own
-citations at its pinned commit.
-
-Each matched entry, ambiguous term, and concept the glossary lacks gets one of
-five results: `consistent`, `conflict`, `version_mismatch`, `ambiguous`, or
-`not_in_glossary`. The checks are:
-
-- **Version scope.** An entry whose definition applies to the document's
-  version is consistent. A `Not present` entry that the document narrates is a
-  version mismatch, unless the pinned source contains the name, or the
-  sentence names another version, uses a historical word, or says the concept
-  is absent. An alias that the glossary limits to other versions is handled
-  the same way.
-- **Parameter facts.** The context, default, minimum, and maximum that the
-  document states for a parameter are compared with the glossary's statement
-  for that version, and with the cited `guc_tables.c`, `guc.c`,
-  `guc_parameters.dat`, or `postgresql.conf.sample` at the pin. Units are
-  converted: `128MB` equals 16384 blocks at 8 kB `BLCKSZ`. Enum spellings come
-  from the options table. The pinned source settles a disagreement. When it
-  contradicts the document, a correction is recorded for the script, and the
-  snapshot stays unchanged.
-- **Acronyms and roles.** An expansion such as "write-ahead log (WAL)" must
-  match the entry's name or aliases. A sentence such as "`pg_stat_activity` is
-  a view" must give the entry's role.
-- **Coverage.** A concept that the glossary lacks, or does not cover for this
-  version, is allowed when its narrated mentions appear in the document's
-  pinned evidence. The allowed concepts are listed as exceptions.
-
-Every narrated sentence and displayed table row in the content is also
-checked against its citations: the sentence's own, else its paragraph's, else
-its section's. Its identifiers, numeric inline code, and quoted strings must
-appear in the cited lines, the cited files, or another file the document
-cites. Each search tries an exact match, then a case-insensitive one, so
-`track_activity_query_size` is found inside `pgstat_track_activity_query_size`.
-A name is not required when the asker used it in the question, when the
-document's own example code defines it, or when the sentence says it does not
-exist. Each such case is reported.
-
-The run directory receives:
-
-| File | Contents |
-| --- | --- |
-| `glossary-check.json` | Each result with its passages, glossary excerpt and version status, evidence links, and resolution; each claim with its citations and where every item was found; corrections, omissions, and exceptions for the script; and how each glossary definition may be used |
-| `glossary-check.md` | Status; blocking issues with the evidence needed and a resolution snippet; warnings; the subject's focus terms; the entries with their version scope; parameter facts against the pinned source; corrections; uncovered concepts; ambiguous terms; and unconfirmed claims |
-
-These problems stop the request with `needs_review` and exit status 3:
-
-- a conflict or version mismatch in narrated text that the pinned source does
-  not settle;
-- a central term that two glossary entries claim equally, or an ambiguous
-  subject term;
-- a central claim with a name that is missing from the pinned evidence;
-- a central concept that neither the glossary nor the evidence supports.
-
-An ordinary word such as "row" that matches an entry only ambiguously is a
-warning, even in a conclusion. So is a central sentence with nothing to look
-up and no citation in its section, such as a verdict drawn from the page's
-own measurements.
-
-To continue, record a decision for each blocking issue in the run's
-`resolutions.yaml`, then resume the same request:
-
-```yaml
-resolutions:
-  - id: "entry:asynchronous-io"
-    decision: use_document   # use_document, use_glossary, omit, or choose_entry
-    reason: "src/backend/storage/aio/ holds read_stream.c in PostgreSQL 17."
-    evidence: raw/postgres-17/src/backend/storage/aio/read_stream.c#L1-L20
-```
-
-```sh
-/path/to/postgres-videos/scripts/pgvideo resume --request <request-id>
-```
-
-`use_document` and `use_glossary` need evidence from the document's own
-`raw/postgres-NN/` tree at its pin. Evidence in the snapshot has its line
-range checked and its excerpt saved; other evidence is recorded as not
-checked. `use_glossary` adds a correction, `omit` leaves the sentence or
-concept out of the narration, and `choose_entry` names the entry an ambiguous
-term means. `resume` runs offline. It rejects unknown IDs, disallowed
-decisions, missing reasons, YAML aliases, and a symlinked resolutions file.
-The manifest records the file's SHA-256. Only the cross-check and the script
-can be resumed; a source or document blocker needs a wiki fix and a new
-request.
-
-### Harness plan, storyboard, and review
-
-After the cross-check passes, `prepare` writes `evidence-packet.json` and stops.
-The packet holds every eligible section with its sentences, table rows, code,
-images, caveat flag, and the old coverage map's choice (for comparison only);
-each sentence's citations and its lexical lookup status, labeled as lexical; the
-candidate glossary entries with their definitions, version scope, forms,
-occurrences, and whether narration may use them, and every candidate meaning of
-an ambiguous term; one excerpt per cited range of a PostgreSQL file, with three
-lines of context, and an evidence ID such as
-`pg:src/backend/utils/misc/guc_tables.c#L3769-L3784` with its SHA-256; files
-cited whole or missing from the snapshot; the parsed configuration facts as
-`guc:<setting>`; the cross-check's open results, corrections, omissions, and
-applied resolutions; the request's audience, detail, and target; and the Kokoro
-speech rate measured from earlier narration with this voice and speed (150 words
-per minute until a minute of audio has been measured). Its content digest leaves
-out the request ID, times, and the speech rate, so the same evidence has the same
-digest in every request.
-
-`plan` validates the harness's plan against `schemas/plan.schema.json`, then
-checks that it names this request and its current evidence digest; keeps the
-request's audience, detail, and target; resolves every source and evidence ID in
-the snapshot; selects only eligible text that no resolution omitted; states each
-Step 6 corrected value; has no selected sentence whose identifiers the pinned
-evidence lacks; assesses every claim as supported with evidence (a contradicted
-or unsupported claim needs review); narrates the main answer and every required
-caveat; accounts for every eligible section, never omitting the question or the
-page's own summary (an omitted caveat section is a warning for the review); and
-budgets within the target's ±15%. An infeasible plan is recorded and reported,
-never trimmed or stretched silently.
-
-`script` validates a version 2 scene file against
-`schemas/storyboard.schema.json`; derived fields such as statuses, checks, and
-word counts are rejected rather than recomputed. Beyond the checks under
-[Narration script and storyboard](#narration-script-and-storyboard): every factual
-sentence names plan claims (whose sources it inherits) and resolvable evidence;
-framing names no claim; every source is selected by the plan; every planned claim
-is narrated, and the main answer and required caveats must be; a `paraphrase` is
-rechecked like any rewritten sentence, and a changed negation is flagged for the
-review; each diagram edge names claims from the sentence it cites, and an edge
-drawn against the direction that sentence states is blocking; and the estimate at
-the measured speech rate must fit the target. `script` never starts narration.
-
-`review` validates the review against `schemas/review.schema.json` and requires
-that it names the current storyboard, plan, and evidence digests; that it
-declares a separate context and did not see the writer's context or
-self-assessment; and that it has exactly one finding for each narration item,
-screen heading and line, diagram node and edge, code/table excerpt, glossary card, and
-hand-written TTS text (`status --json` lists them as `review_targets`). The gate
-passes when every whole-video check passed, every factual finding is `supported`
-with resolvable evidence, and no finding or editorial note is material; minor findings are delivered in
-`content-report.md`. After a failed review the harness may import two repaired
-storyboards, each reviewed again; the next needs `--human-revision`. The gate is
-checked by narration, media reuse, timing, rendering, and validation themselves,
-under review policy 3; a new policy requires a new review. The reviewer receives the plan view from `review-input`,
-not `plan.json` or `plan-report.md`. It must judge coverage for every eligible section with content; full detail
-cannot omit sections or planned claims. Only the isolated reviewer may create or correct review verdicts.
-
-The reviewer fills the template that `review-input` writes; pgvideo refuses a file that still holds a `pending`
-value. When a storyboard is revised, the next template carries the findings of the targets whose text, claims,
-and evidence did not change, and the import verifies each carried finding against the earlier review kept in
-`runs/<id>/reviews/`. The whole-video checks are judged again on every revision.
-
-`build` compares the measured narration with the target. Outside ±15%, it stops
-for one `--duration-rewrite`: shorten optional detail when long; expand from unused allowed content when short,
-revising the plan first if needed. If no allowed expansion remains, report infeasibility. Then only your
-`--accept-duration`, which stays valid while the same storyboard measures the
-same length. Validation prepares the reports and media; final publication requires `media-review` of every scene
-and complete MP4 playback. The quality report records both gates. `resume` and `replay` import the saved `authored/` files through the same
-checks, so resumed and replayed content is revalidated, not trusted.
-
-### Narration script and storyboard
-
-This section describes the built-in extractive drafter that older requests used
-and that `baseline` still runs for comparison, and the checks every storyboard
-passes. A harness request's plan, storyboard, and review are described under
-[Harness plan, storyboard, and review](#harness-plan-storyboard-and-review).
-
-The built-in drafter works without network access or a language model. It first checks `document.json`,
-`glossary-matches.json`, and `glossary-check.json` against the SHA-256 values
-in the manifest. The run directory receives:
-
-| File | Contents |
-| --- | --- |
-| `draft-input.json` | What any drafter receives: the narrated sections with their sentences, code, tables, and images, and the sentences a summary keeps; the glossary entries the document matched and whether the script may use each definition; ambiguous terms; Step 6 corrections and omissions; citations; the level of detail and length limits; and the scene schema |
-| `storyboard.json` | The scenes in playback order, each with its ID, outline part, title, screen, visual description, narration, sources, glossary entries, and citations; every sentence's display text, TTS text, origin, and check; the coverage of each section; corrections; issues; and a length estimate |
-| `script.md` | The storyboard for review: issues, the outline, each scene with its screen and narration, the TTS text, and the coverage table |
-
-The built-in drafter is deterministic and extractive. It narrates the page's
-own sentences in the page's order, after a title scene, the question, and the
-central glossary terms, and it ends with the open questions, a recap from the
-page's conclusions, and the sources. It splits long sentences at semicolons,
-and at colons that start a new clause, without changing their words. Sections
-that the coverage map summarizes keep their lead sentence and their most
-relevant sentences within the planned word count, and so do open questions
-that it summarizes. A condensed table shows and reads only the first rows the
-coverage map kept, then says "The table on the page has more rows." Omitted
-sections are left out. Step 6 corrections replace
-the stated value, and sentences that a resolution omitted are left out.
-
-A summary narrates exactly the sentences the coverage map kept for each section
-it reduces, without the section's tables and code. If a resolution omitted a
-kept sentence, the section falls back to its other sentences within the
-planned word count. A summary has no recap, since it has just narrated the
-page's conclusions. The opening slide of a summary shows "Summary" and says
-that the video summarizes the page; a full-detail video shows "Full detail".
-
-Screens show the first whole clause of each sentence, never cut before a
-qualifier such as "unless" or "not", inside parentheses, or in the middle of a
-list. Code, tables, and images stay on screen while the sentence that
-introduces them and the paragraph that follows are narrated; long code and
-tables are split across scenes, and table rows are read aloud. A scene whose
-sentences state at least two relationships between named components, such as
-"`pg_stat_activity` is a SQL view over `pg_stat_get_activity(NULL)`", shows
-them as a diagram, and ordered lists become numbered steps. Framing sentences
-such as "To recap." may name only what the title and question name.
-
-Each sentence keeps its display text for the screen and captions, and TTS
-text for Kokoro. `src/pgvideo/speech.py` derives the TTS text with the rules in
-`pronunciation/en.yaml`: `pg_stat_activity.query` becomes "P G stat activity
-dot query", `PGC_POSTMASTER` becomes "P G C postmaster", and `x * (a + b)`
-becomes "x times, a plus b". The storyboard records the dictionary's SHA-256.
-
-To change the script, edit a copy of `storyboard.json`, or write JSON or YAML
-in the same shape, and import it. A scene file path is resolved from the
-project root and must stay inside the project. Fields that the storyboard
-derives, such as checks and word counts, are recomputed; set
-`tts_source: manual` to keep a hand-written TTS text.
-
-```sh
-/path/to/postgres-videos/scripts/pgvideo script --request <request-id> --storyboard runs/<request-id>/edited.yaml
-```
-
-`--drafter-command <file>` runs an executable inside the project instead. It
-receives `draft-input.json` on standard input and writes scenes on standard
-output, within the offline sandbox. To draft with a text model or service
-that needs the network, run it anywhere on `draft-input.json` and import its
-output with `--storyboard`. Without either option, `script` redrafts with the
-built-in drafter; `resume` reuses the drafter the request last used.
-
-Every scene, whoever drafted it, is validated the same way:
-
-- Every source must be a section, block, sentence, or row that the coverage
-  map narrates; excluded text, sentences a resolution omitted, and unknown
-  IDs block. Every narrated or summarized question, summary, caveat, or
-  open-questions section must appear in a scene, unless `coverage_overrides`
-  records why it is left out; other sections left out are warnings.
-- A sentence whose letters and digits appear in order in its sources is
-  unchanged and keeps its Step 6 claim status, unless the words it leaves out
-  include a limiting word such as "not", "only", or "unless".
-- Any other sentence is rechecked as Step 6 checked the original: its names,
-  numeric code, quoted strings, numbers, and version mentions must be in its
-  sources or the pinned evidence; its parameter facts must agree with the
-  pinned GUC table; and it must keep its source's negation.
-- A glossary sentence must be a definition that Step 6 allows for this
-  version; a correction sentence must state the corrected value.
-- Screen text, diagram labels, and glossary cards must come from the scene's
-  narration and sources; code excerpts and tables must match their blocks.
-- The opening scene must show the PostgreSQL version, and no TTS text may
-  contain backticks, underscores, URLs, or symbols Kokoro would read aloud.
-
-A blocking issue stops the request with `needs_review` and exit status 3; an
-invalid scene file or a failed drafter command exits with status 1. The
-manifest records the drafter, its input's SHA-256, the pronunciation
-dictionary's SHA-256, and the storyboard's hash. The length estimate uses
-150 spoken words per minute; spoken identifiers make a script longer than the
-coverage map planned, so a script over 10 minutes is a warning for a page
-that fits the target and a note for a long page. A summary's target is 1–3
-minutes, so a longer summary gets a note; full detail has no target and no
-length issue. Step 8 measures the real length.
+### Storyboard import
+
+`build` first reads the storyboard file, checks it against
+`schemas/storyboard.schema.json`, and writes `runs/<id>/storyboard.json`: the
+same scenes, with an ID for every sentence (`<scene>.n<number>`), the text
+Kokoro speaks, the SHA-256 of every slide image, and an estimate of the length.
+The estimate uses the speech rate measured in earlier runs with the same voice
+and speed, or 150 words per minute until a minute of narration exists.
+`runs/<id>/script.md` renders the result for reading and is delivered as
+`transcript.md`. Nothing here reads the wiki or compares the storyboard with a
+document.
+
+Display text is what the screen and captions show. Spoken text comes from
+`pronunciation/en.yaml`: identifiers are split into words, acronyms are spelled
+or given a spoken form, and operators become words.
 
 ### Kokoro narration
 
-After a script passes validation, the tool splits dictionary-generated speech
-at clauses and at 28-word limits. It synthesizes every Kokoro chunk in order,
-caches 24 kHz mono WAV units by exact TTS text and asset versions, and inserts
-sentence and scene pauses. The raw master is normalized with FFmpeg's two-pass
-`loudnorm` at -16 LUFS and -1.5 dBTP by default. The run contains
-`narration/units/`, `narration/master-raw.wav`, `narration/master.wav`,
+The tool splits dictionary-generated speech at clauses and at 28-word limits.
+It synthesizes every Kokoro chunk in order, caches 24 kHz mono WAV units by
+exact TTS text and asset versions, and inserts sentence and scene pauses. The
+raw master is normalized with FFmpeg's two-pass `loudnorm` at -16 LUFS and
+-1.5 dBTP by default. The run contains `narration/units/`,
+`narration/master-raw.wav`, `narration/master.wav`,
 `narration/audio-map.json`, and `narration/narration-report.md`. The map records
-each unit's sample range on the continuous audio clock for Step 9.
+each unit's sample range on the continuous audio clock for timing.
 
 To repeat the audio stage or regenerate a unit after listening:
 
 ```sh
-/path/to/postgres-videos/scripts/pgvideo narrate --request <request-id>
-/path/to/postgres-videos/scripts/pgvideo narrate --request <request-id> --refresh-unit s01-title.n1.u1
+/path/to/postgres-videos/scripts/pgvideo narrate --request <id>
+/path/to/postgres-videos/scripts/pgvideo narrate --request <id> --refresh-unit opening.n1.u1
 ```
 
-Edit `pronunciation/en.yaml` or a scene's TTS text to correct a pronunciation,
-then rerun `script` so the storyboard and dictionary hash are validated before
-the next narration. Manually edited TTS stays in one audio unit.
+Manually written TTS stays in one audio unit.
 
 ### Timing and subtitles
 
@@ -1069,49 +444,43 @@ pauses remain in the timeline without subtitle text. To rebuild these files
 without resynthesizing audio:
 
 ```sh
-/path/to/postgres-videos/scripts/pgvideo timing --request <request-id>
+/path/to/postgres-videos/scripts/pgvideo timing --request <id>
 ```
 
-### Rendering, validation, and delivery
+### Rendering, checks, and delivery
 
 After timing, Playwright renders each storyboard scene to a PNG using the
 bundled fonts and a reusable slide template. It rejects overflow, missing
 images, and fonts outside the bundle. The renderer holds each PNG for the
 scene's measured frame count, then encodes `render/draft.mp4` with H.264 video
 at 30 fps and Opus mono audio at 48 kHz. `render.json` records the input and
-artifact hashes, and `references.md` links to the resolved document and
-commit-specific citations. Validation fully decodes the draft, checks its
-streams, timing, caption coverage, spoken units, silence, and loudness, then
-prepares the MP4 and accompanying files under the run's `delivery/` directory. For harness requests,
-`media-review` publishes them to `output/<request-id>/` after actual inspection passes. Older extractive
-requests retain automatic delivery. The run's
-`quality-report.json` records the measurements and delivery hashes.
+artifact hashes, and `references.md` lists the page and each scene's citations.
+The checks fully decode the draft, verify its streams, timing, caption
+coverage, spoken units, silence, and loudness, and then copy the MP4 and its
+accompanying files to `output/<id>/`. The run's `quality-report.json` records
+the measurements and delivery hashes. These are checks of the media; none of
+them looks at what the video says.
 
 The audio is encoded with libopus at 192 kb/s by default. A lower bitrate adds
 more to the narration master's true peak (about 0.1 dB at 192 kb/s; 0.5 to
-0.8 dB at 128 kb/s and below), toward the true-peak limit that validation
-checks. Opus in MP4 plays in Chrome, Edge, and Firefox. Apple platforms decode
+0.8 dB at 128 kb/s and below), toward the true-peak limit that the checks
+enforce. Opus in MP4 plays in Chrome, Edge, and Firefox. Apple platforms decode
 it from iOS 17; earlier versions play the video without sound.
 
 When a stage runs again, the manifest drops the records of every later stage,
 including an earlier validation, so it never describes media that was built
-from older inputs. Repeating the glossary cross-check or the script also drops
-the reuse lookup, which belongs to one storyboard.
+from older inputs. Importing a storyboard also drops the reuse lookup, which
+belongs to one storyboard.
 
 ### Reuse of validated videos
 
-After the content gate passes, `build` (and, for an older request, `resume` and
-`script`) looks for a validated video with the same key before narrating. The key is the SHA-256 of every input
-that decides the video:
+Before narrating, `build` looks for a validated video with the same key. The
+key is the SHA-256 of every input that decides the video:
 
-- the page, the glossary, wiki images, and the cited PostgreSQL files, by
-  SHA-256, with the wiki commit and the PostgreSQL source pin;
-- the storyboard, without its request ID, time, and drafter record (and, for a
-  harness storyboard, without its length estimates and statuses, which follow the
-  measured speech rate). It keeps
-  the page's URL and wiki commit, which the slides and references show, so a
-  video is reused only for the same wiki commit, and the level of detail, so a
-  video is reused only for the same level;
+- the imported storyboard, without its request ID, time, source file name,
+  length estimates, and issues. It includes the title, the document's path and
+  version, which the slides and references show, every scene's screen and
+  narration, and the SHA-256 of every slide image;
 - the pronunciation dictionary;
 - the voice, language, speed, loudness target, and true-peak limit, and the
   Kokoro model, configuration, and voice files;
@@ -1121,10 +490,6 @@ that decides the video:
   and the code of the speech, narration, timing, rendering, and validation
   modules.
 
-A new glossary snapshot therefore never reuses a video, or the cross-check
-behind it, even when the page is unchanged: every request cross-checks its own
-snapshot, and the glossary's hash is part of the key.
-
 Validation registers each delivered video as
 `cache/videos/<key>/<request-id>.json`, with the SHA-256 of its audio map,
 render record, unit WAVs, masters, slides, MP4, and references. It registers a
@@ -1132,10 +497,11 @@ video only when the narration, timing, and render stages ran with the same
 tools and code as the validation. A lookup verifies every listed file in the
 earlier request's run directory, copies the narration and MP4 into the new
 request, and then runs the new request's own timing and validation, so the
-delivered video is checked again. An entry whose files are missing or changed
-is reported, skipped, and removed from the index. If the copied narration or
-MP4 cannot be used, that stage is built instead. A lookup never creates,
-changes, or delivers another request.
+delivered video is checked again. A request that is built again without a
+change finds its own video and copies nothing. An entry whose files are missing
+or changed is reported, skipped, and removed from the index. If the copied
+narration or MP4 cannot be used, that stage is built instead. A lookup never
+creates, changes, or delivers another request.
 
 The manifest's `reuse` record keeps the key, its components, the lookup's
 result, and whether the video was registered. Reused stages name their source
@@ -1151,8 +517,8 @@ turn.
 /path/to/postgres-videos/scripts/pgvideo test
 ```
 
-The suite runs inside the offline sandbox in about two minutes. Tests mock GitHub
-access and create their temporary fixtures under `.runtime/tmp/`, including the
+The suite runs inside the offline sandbox in about a minute and a half. Tests
+create their temporary fixtures under `.runtime/tmp/`, including the
 directories used to simulate escaping paths.
 
 - **Environment:** the sandbox probes, including UDP sockets; the sandbox
@@ -1161,88 +527,22 @@ directories used to simulate escaping paths.
   the project; tools on `PATH`, and no tools on `PATH` at all; a missing
   project-local ffprobe with a decoy on `PATH`; ELF dependency resolution;
   archive extraction; and the bootstrap pins in `scripts/setup`.
-- **Focused checks with small fixtures:** `tests/fixtures/` holds a small wiki,
-  with a glossary and one page per case under `wiki/v18/checks/`, and the pinned
-  PostgreSQL files that the pages cite. `test_checks.py` runs each page through
-  `prepare`. Invalid requests (a missing page, a directory, a non-Markdown
-  file, a glob, traversal, another repository, a conflicting or missing ref, an
-  output directory outside the project, and an unprovisioned voice) fail before
-  a request exists. A consistent page reaches the evidence packet, and stops
-  there for the harness, from a path or a blob URL. An alias that two entries claim, a central term with no support, a
-  default that contradicts the glossary, an entry not present in PostgreSQL 18,
-  and missing or out-of-range evidence each stop the request before narration.
-  A contradictory default that the pinned GUC table settles reaches the
-  evidence packet as a correction, and the extractive baseline applies it.
-- **Source snapshots** use an in-memory GitHub fake to cover single-commit
-  retrieval, cache reuse and repair, a glossary downloaded again for every
-  request, tampered downloads, every blocking version and evidence check, and
-  cache symlink escapes.
-- **Documents** are parsed through the same fake to cover block structure,
-  line numbers, stable IDs, citation removal, maintenance exclusion,
-  extraction, long-document coverage, summary and full-detail coverage (the
-  sentences a summary keeps, its budget, a nested Short answer, and the
-  conclusions of a page without a summary section), an unknown level, tables
-  planned at the words of their rows and condensed to their first rows, and
-  altered snapshot copies.
-- **Glossary matching** covers entry parsing, alias qualifiers, version notes
-  and their references, an index built for each request from its own glossary
-  copy, word boundaries, short aliases that need context, alias collisions,
-  version-limited aliases, unmatched terms, and altered document records and
-  glossary copies.
-- **Cross-checks** cover consistent entries, parameter facts against the
-  glossary and a pinned GUC table, pinned-source corrections, unit and enum
-  comparison, version mismatches and their qualifiers, version-limited aliases,
-  acronym expansions, roles, ambiguous central terms, allowed and unsupported
-  concepts outside the glossary, claim evidence, every blocking case,
-  documented resolutions and their validation, altered inputs, and `prepare`
-  followed by `resume`.
-- **Scripts** cover the built-in draft's outline, traceability, sentence
-  splitting, corrections, tables, code, diagrams, steps, caveats, and
-  summaries; a summary's kept sentences, its opening, the missing recap, and a
-  kept sentence that a review omits; full detail without a length target; a
-  table read with exactly the planned words, and a condensed table that shows
-  and reads only its first rows;
-  every validation check on edited scene files; invalid scene files;
-  a drafter command; resolutions followed by `resume` and `script`; altered
-  inputs; and the pronunciation rules.
-- **Kokoro integration:** `test_integration.py` narrates a three-scene
-  storyboard with the real Kokoro model, including a hand-written unit long
-  enough for several Kokoro chunks, then times, renders, and validates it. It
-  checks that every chunk reaches its unit WAV, that pauses and sample positions
-  add up, that normalization does not move the audio, that captions and scene
-  frames follow the samples, and that the MP4's decoded audio stays within 2 ms
-  of the master from the first unit to the last, with the last unit present.
-  A dropped chunk, a 5 ms shift during normalization, and a 50 ms audio offset
-  in the MP4 each fail it.
-- **Timing, rendering, and validation** cover frame boundaries, pauses, caption
-  offsets, the final tail, changed units, exact frame counts, delivery, the
-  file name of each level of detail, and output directories outside the
-  project. A repeated stage drops the records
-  built from it.
-- **Harness workflow:** `test_harness.py` uses recorded harness files, derived
-  from the extractive baseline, to cover `prepare` stopping at the evidence
-  packet, eligibility and the kept static map, stable evidence digests, the
-  refused extractive fallback, request constraints, snapshot-only excerpts,
-  the evidence packet read as a file and not through a command, source ranges
-  without size caps,
-  every plan check, a repair read from a compact result and patched into a new
-  revision with `revise` and the omissions template, every storyboard check,
-  derived fields and stale digests,
-  the review's coverage, separation, stale and malformed reviews, material and
-  unsupported findings, the bounded repair rounds and a person's revision,
-  resume and replay without inference, a new instruction version, the
-  measured-duration check, and older requests that are not gated. It includes
-  the proposal's two semantic mutations: "uses … to read" changed to "to erase"
-  still passes the lexical recheck as `verified`, and only the review's
-  `contradicted` finding stops it, which then blocks `build` and a direct
-  narration; a diagram edge reversed against its sentence is rejected before
-  review. These tests exercise pgvideo's contracts, not a model.
-- **Reuse:** `test_reuse.py` runs each request through `prepare`, recorded
-  harness content, and `build`, and covers the key; an identical request that reuses
-  the validated video; new builds for a changed speed, another level of
-  detail, a new glossary snapshot, and `--no-reuse`, and a repeated summary
-  that reuses its own video; changed or missing files; tampered index entries and an
-  escaping cache; retries that reuse their own video without creating requests;
-  and videos from other tools, which are not registered. It runs FFmpeg,
-  Chromium, timing, and validation for real, with a deterministic stand-in for
-  Kokoro.
+- **Storyboards** (`test_storyboard.py`) cover the import of a storyboard that
+  uses every layout, sentence IDs and spoken text, the transcript, the issues
+  narration and rendering depend on, the schema as the whole format, slide
+  images, the digest that keys a video, and length estimates. They also show
+  that changed values, wording, edge directions, and sources import unchanged,
+  that the plan schema describes a plan and no code reads one, and that the
+  pronunciation rules make identifiers, code, and prose speakable.
+- **Builds** (`test_build.py`) run `build` end to end with real FFmpeg and
+  Chromium and a deterministic stand-in for Kokoro: the delivered files and the
+  JSON result, a request rebuilt in place and from a new storyboard revision,
+  reuse between requests, every input that changes the key, changed or missing
+  files, tampered index entries, a run directory that already holds the
+  downloaded wiki, a storyboard that cannot be narrated, and invalid requests.
+- **Timing, rendering, and validation** cover frame-exact timelines and
+  captions, slides and references, the media checks, and delivery paths that
+  must stay inside the project.
+- **Integration** (`test_integration.py`) narrates a three-scene storyboard
+  with the real Kokoro model and follows every sample from its chunks to the
+  delivered MP4.

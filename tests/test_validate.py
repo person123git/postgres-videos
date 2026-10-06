@@ -4,7 +4,6 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from pgvideo.validate import validate_video
 from pgvideo.narration import _units
@@ -24,8 +23,8 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def delivery_fixture(run: Path, output: Path, detail: str | None = None) -> None:
-    """Write a one-second draft and the passed records that Step 11 validates and delivers."""
+def delivery_fixture(run: Path, output: Path) -> None:
+    """Write a one-second draft and the passed records that validation checks and delivers."""
     (run / "render").mkdir(parents=True)
     (run / "narration").mkdir()
     ffmpeg = ROOT / ".runtime/bin/ffmpeg"
@@ -36,9 +35,8 @@ def delivery_fixture(run: Path, output: Path, detail: str | None = None) -> None
                     "-pix_fmt", "yuv420p", "-c:a", "libopus", "-b:a", "192k", "-ar", "48000",
                     "-ac", "1", "-frames:v", "30", str(draft)], check=True)
     document = {"path": "wiki/v18/sample.md", "version": 18,
-                "url": "https://github.com/example/wiki/blob/" + "a" * 40 + "/wiki/v18/sample.md"}
-    script_hash = save(run / "storyboard.json", {"document": document,
-        **({"settings": {"detail": detail}} if detail else {}),
+                "url": "https://example.org/wiki/v18/sample.md"}
+    script_hash = save(run / "storyboard.json", {"title": "Sample", "document": document,
         "scenes": [{"id": "s1", "narration": [{"id": "n1", "text": "Sample."}]}]})
     audio_map_hash = save(run / "narration/audio-map.json", {"sample_rate": 24000,
         "total_samples": 24000, "scenes": [{"id": "s1", "units": [{"id": "n1.u1",
@@ -54,48 +52,17 @@ def delivery_fixture(run: Path, output: Path, detail: str | None = None) -> None
     (run / "captions.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nSample.\n\n")
     (run / "references.md").write_text("# References\n")
     (run / "script.md").write_text("# Sample\n")
-    (run / "glossary-check.md").write_text("# Passed\n")
     render_hash = save(run / "render.json", {"sha256": digest(draft), "frames": 30,
         "references_sha256": digest(run / "references.md")})
-    save(run / "request.json", {"settings": {"width": 640, "height": 360,
-        "output_dir": str(output)}, "document": document})
+    save(run / "request.json", {"settings": {"width": 640, "height": 360, "output_dir": str(output)}})
     save(run / "manifest.json", {"render": {"status": "passed", "sha256": render_hash,
         "draft_sha256": digest(draft)}, "timing": {"status": "passed", "sha256": timeline_hash,
         "srt_sha256": digest(run / "captions.srt"), "vtt_sha256": digest(run / "captions.vtt")},
         "narration": {"status": "passed", "sha256": audio_map_hash},
-        "script": {"status": "passed", "sha256": script_hash},
-        "sources": {"status": "passed"}, "glossary_check": {"status": "passed"}})
+        "script": {"status": "passed", "sha256": script_hash}})
 
 
 class ValidationTests(unittest.TestCase):
-    def test_harness_validation_prepares_the_package_without_publishing_it(self):
-        with tempfile.TemporaryDirectory(prefix="pgvideo-validate-", dir=ROOT / ".runtime/tmp") as temporary:
-            run = Path(temporary) / "run"
-            output = Path(temporary) / "output"
-            output.mkdir()
-            delivery_fixture(run, output)
-            request = json.loads((run / "request.json").read_text())
-            request["workflow"] = {"kind": "harness"}
-            save(run / "request.json", request)
-            manifest = json.loads((run / "manifest.json").read_text())
-            for stage, name in (("plan", "plan.json"), ("content_review", "content-review.json"),
-                                ("evidence", "evidence-packet.json")):
-                manifest[stage] = {"sha256": save(run / name, {}), "digest": "0" * 64}
-            manifest["content_review"].update(policy=2, reviewer={"separation": "fresh_context"},
-                                            counts={"verdicts": {}, "minor": 0})
-            (run / "content-report.md").write_text("# Recorded content review\n")
-            (run / "plan-report.md").write_text("# Recorded plan\n")
-            save(run / "orchestration.json", {})
-            save(run / "manifest.json", manifest)
-            # Content/duration gates are tested in test_harness; this isolates actual FFmpeg validation and publication.
-            with patch("pgvideo.validate.require_content_gate"), patch("pgvideo.validate.require_duration"):
-                result = validate_video(ROOT, run)
-            self.assertEqual(result["status"], "passed")
-            self.assertTrue((run / "delivery/sample.mp4").is_file())
-            self.assertFalse((output / run.name).exists())
-            self.assertEqual(json.loads((run / "manifest.json").read_text())["status"], "media_review_pending")
-            self.assertEqual(json.loads((run / "quality-report.json").read_text())["media_review"], "pending")
-
     def test_audio_unit_split_keeps_punctuation_after_inline_code(self):
         text = ("When a backend initializes its status entry, it clears the activity string and "
                 "forces the last byte of the slot to `\\0`, "
@@ -112,25 +79,32 @@ class ValidationTests(unittest.TestCase):
             delivery_fixture(run, output)
             result = validate_video(ROOT, run)
             self.assertEqual(result["status"], "completed")
-            # Records from before Step 12 carry no tools digest, so the video is delivered but not registered.
+            # Records without a tools digest are delivered but not registered for reuse.
             reuse = json.loads((run / "manifest.json").read_text())["reuse"]
             self.assertEqual((reuse["registered"], reuse["reason"]), (False, "the narration, timing, and render "
                              "stages recorded no tools digest; repeat them to register the video"))
             delivery = output / run.name
             self.assertTrue((delivery / "sample.mp4").is_file())
             self.assertEqual(json.loads((delivery / "manifest.json").read_text())["status"], "completed")
-            self.assertEqual(json.loads((delivery / "quality-report.json").read_text())["status"], "completed")
+            quality = json.loads((delivery / "quality-report.json").read_text())
+            self.assertEqual((quality["status"], quality["document"]["path"]),
+                             ("completed", "wiki/v18/sample.md"))
+            self.assertEqual(sorted(path.name for path in delivery.iterdir()),
+                             ["captions.srt", "captions.vtt", "manifest.json", "quality-report.json", "references.md",
+                              "sample.mp4", "transcript.md"])
 
-    def test_summary_and_full_detail_videos_name_their_level(self):
-        for detail, name in (("standard", "sample.mp4"), ("summary", "sample-summary.mp4"),
-                             ("full", "sample-full.mp4")):
-            with tempfile.TemporaryDirectory(prefix="pgvideo-validate-", dir=ROOT / ".runtime/tmp") as temporary:
-                run = Path(temporary) / "run"
-                output = Path(temporary) / "output"
-                output.mkdir()
-                delivery_fixture(run, output, detail)
-                self.assertEqual(validate_video(ROOT, run)["video"], name)
-                self.assertEqual(sorted(path.name for path in (output / run.name).glob("*.mp4")), [name])
+    def test_every_stage_must_pass_before_validation(self):
+        with tempfile.TemporaryDirectory(prefix="pgvideo-validate-", dir=ROOT / ".runtime/tmp") as temporary:
+            run = Path(temporary) / "run"
+            output = Path(temporary) / "output"
+            output.mkdir()
+            delivery_fixture(run, output)
+            manifest = json.loads((run / "manifest.json").read_text())
+            manifest["script"]["status"] = "needs_review"
+            save(run / "manifest.json", manifest)
+            with self.assertRaisesRegex(ValueError, "The script stage must pass before validation"):
+                validate_video(ROOT, run)
+            self.assertEqual(list(output.iterdir()), [])
 
     def test_delivery_rejects_output_paths_that_leave_the_project(self):
         with tempfile.TemporaryDirectory(prefix="pgvideo-validate-", dir=ROOT / ".runtime/tmp") as temporary:

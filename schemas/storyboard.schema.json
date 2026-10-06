@@ -1,21 +1,29 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pgvideo.invalid/schemas/storyboard.schema.json",
-  "title": "pgvideo harness storyboard, version 2",
-  "description": "The scene file a harness writes from the accepted content plan. Every factual narration item names the plan claims it states and the evidence that supports it. Derived fields such as statuses, checks, word counts, and TTS text from the pronunciation dictionary are computed by pgvideo and must not appear here. Version 1 scene files remain valid only for requests made before the harness workflow.",
+  "title": "pgvideo storyboard, version 3",
+  "description": "The scenes of one narrated video: what each screen shows and what is said over it. pgvideo narrates and renders this file as written; it does not compare it with the document. Sentence IDs, TTS text from the pronunciation dictionary, word counts, and estimates are computed by pgvideo and must not appear here.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "request_id", "plan_digest", "producer", "scenes"],
+  "required": ["schema", "title", "document", "scenes"],
   "properties": {
-    "schema": {"const": "pgvideo/storyboard/v2"},
-    "request_id": {"type": "string", "minLength": 1},
-    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "digests.plan_digest from `status`"},
-    "producer": {"$ref": "plan.schema.json#/$defs/producer"},
+    "schema": {"const": "pgvideo/storyboard/v3"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200, "description": "The video's title"},
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "version"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "description": "The wiki page the video explains, by its path in the wiki repository, such as wiki/v18/page.md; shown in each slide's footer and in the references"},
+        "version": {"type": ["integer", "string"], "description": "The PostgreSQL version the page describes; every slide shows it"},
+        "url": {"type": "string", "minLength": 1, "description": "Where the page is published, for the references"}
+      }
+    },
     "scenes": {"type": "array", "minItems": 1, "maxItems": 2000, "items": {"$ref": "#/$defs/scene"}}
   },
   "$defs": {
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
-           "description": "An ID you choose: lowercase letters, digits, and hyphens. Document unit IDs such as short-answer.1.s1 keep their dots wherever they are cited; do not rename them to fit this pattern"},
+           "description": "An ID you choose: lowercase letters, digits, and hyphens"},
     "strings": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "scene": {
       "type": "object",
@@ -24,32 +32,29 @@
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "part": {"enum": ["opening", "question", "terminology", "answer", "mechanism", "example", "caveat",
-                          "supporting", "open_questions", "recap", "credits"]},
+                          "supporting", "open_questions", "recap", "credits"],
+                 "description": "Which step of the explanation the scene serves; shown above the heading"},
         "title": {"type": "string", "minLength": 1, "maxLength": 120},
         "screen": {"$ref": "#/$defs/screen"},
-        "visual": {"type": "string", "maxLength": 400, "description": "What the screen teaches, in one or two sentences"},
+        "visual": {"type": "string", "maxLength": 400, "description": "What the screen teaches, in one or two sentences; for the transcript"},
         "narration": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/narration"}},
-        "sources": {"$ref": "#/$defs/strings"},
-        "glossary": {"$ref": "#/$defs/strings"},
-        "citations": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+        "sources": {"$ref": "#/$defs/strings", "description": "Where in the document the scene comes from: section headings or line ranges"},
+        "citations": {"type": "array", "description": "Links listed under this scene in the references",
+                      "items": {"type": "object", "additionalProperties": false, "required": ["url"],
+                                "properties": {"text": {"type": "string"}, "url": {"type": "string", "minLength": 1}}}}
       }
     },
     "narration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["text", "origin"],
+      "required": ["text"],
       "properties": {
-        "text": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "Display text: captions and transcript"},
-        "origin": {"enum": ["document", "table", "correction", "glossary", "paraphrase", "framing"],
-                   "description": "framing carries no technical claim; every other origin needs claims and sources"},
-        "sources": {"$ref": "#/$defs/strings"},
-        "claims": {"type": "array", "items": {"$ref": "#/$defs/id"}},
-        "evidence": {"type": "array", "items": {"$ref": "plan.schema.json#/$defs/reference"}},
-        "glossary": {"$ref": "#/$defs/strings"},
-        "citations": {"type": "array", "items": {"type": "integer", "minimum": 0}},
-        "correction": {"type": "string"},
-        "tts": {"type": "string", "minLength": 1, "maxLength": 1200},
-        "tts_source": {"enum": ["dictionary", "manual"]}
+        "text": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "Display text: captions and transcript; inline code in backticks"},
+        "origin": {"enum": ["document", "table", "glossary", "paraphrase", "framing"],
+                   "description": "Where the sentence comes from; framing introduces, connects, or closes and carries no technical claim"},
+        "sources": {"$ref": "#/$defs/strings", "description": "Where in the document the sentence comes from: section headings or line ranges"},
+        "tts": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "What Kokoro reads, only with tts_source manual"},
+        "tts_source": {"enum": ["dictionary", "manual"], "description": "dictionary (the default) derives the spoken text from pronunciation/en.yaml"}
       }
     },
     "screen": {
@@ -63,19 +68,15 @@
         "code": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["source", "content"],
-          "properties": {
-            "source": {"type": "string"}, "first_line": {"type": "integer", "minimum": 1},
-            "content": {"type": "string"}, "language": {"type": ["string", "null"]}, "kind": {"type": ["string", "null"]}
-          }
+          "required": ["content"],
+          "properties": {"content": {"type": "string", "minLength": 1}, "language": {"type": ["string", "null"]}}
         },
         "table": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["source", "header", "rows"],
+          "required": ["header", "rows"],
           "properties": {
-            "source": {"type": "string"},
-            "header": {"type": "array", "items": {"type": "string"}},
+            "header": {"type": "array", "minItems": 1, "items": {"type": "string"}},
             "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
           }
         },
@@ -88,20 +89,20 @@
               "type": "object", "additionalProperties": false, "required": ["id", "label"],
               "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}}}},
             "edges": {"type": "array", "minItems": 1, "items": {
-              "type": "object", "additionalProperties": false, "required": ["from", "to", "label", "source", "claims"],
+              "type": "object", "additionalProperties": false, "required": ["from", "to", "label"],
               "properties": {
-                "from": {"type": "string"}, "to": {"type": "string"}, "label": {"type": "string", "minLength": 1},
-                "source": {"type": "string", "minLength": 1, "description": "The narrated sentence ID that states this relationship"},
-                "claims": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id"},
-                           "description": "The plan claims that justify the edge's direction and label"}}}}
+                "from": {"type": "string", "description": "The ID of the node that acts"},
+                "to": {"type": "string", "description": "The ID of the node it acts on"},
+                "label": {"type": "string", "minLength": 1}}}}
           }
         },
-        "terms": {"type": "array", "items": {
-          "type": "object", "additionalProperties": false, "required": ["anchor", "term", "definition"],
-          "properties": {"anchor": {"type": "string"}, "term": {"type": "string"}, "definition": {"type": "string"}}}},
-        "image": {"type": "object", "additionalProperties": false, "required": ["link"],
-                  "properties": {"link": {"type": "integer", "minimum": 0}}},
-        "footer": {"type": "string", "maxLength": 200}
+        "terms": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["term", "definition"],
+          "properties": {"term": {"type": "string", "minLength": 1}, "definition": {"type": "string", "minLength": 1}}}},
+        "image": {"type": "object", "additionalProperties": false, "required": ["path"],
+                  "properties": {"path": {"type": "string", "minLength": 1, "description": "An image file inside the project, from the project root, such as runs/<id>/wiki_content/v18/images/figure.png"},
+                                 "alt": {"type": "string"}}},
+        "footer": {"type": "string", "maxLength": 200, "description": "Replaces the document path at the bottom of the slide"}
       }
     }
   }

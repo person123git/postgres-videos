@@ -1,4 +1,4 @@
-"""Render checked storyboard scenes and assemble a frame-aligned draft MP4."""
+"""Render the storyboard's scenes as slides and assemble a frame-aligned draft MP4."""
 
 from __future__ import annotations
 
@@ -14,10 +14,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup, escape
 from playwright.sync_api import sync_playwright
 
-from .orchestration import require_content_gate
-from .paths import project_directory
+from .paths import project_directory, write_atomic
 from .reuse import stage_fingerprint
-from .sources import write_atomic
 from .stages import invalidate_after
 
 RECORD = "render.json"
@@ -43,31 +41,27 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
     return result
 
 
-def _image(root: Path, run_dir: Path, storyboard: dict, screen: dict) -> str | None:
+def _image(root: Path, screen: dict) -> str | None:
+    """Return the file URL of a slide's image, which is the project file the storyboard import recorded."""
     image = screen.get("image")
     if not image:
         return None
     path = image.get("path")
     if not isinstance(path, str) or not path or path.startswith(("http:", "https:", "/")):
-        raise ValueError("Slide image must be a snapshot file in inputs/wiki")
-    document = storyboard["document"]["path"]
-    snapshot = (run_dir / "inputs/wiki").resolve()
-    candidates = [(snapshot / Path(document).parent / path).resolve(), (snapshot / path).resolve()]
-    resolved = next((item for item in candidates if item.is_relative_to(snapshot) and item.is_file()), None)
-    if resolved is None:
-        raise ValueError(f"Slide image is missing from the wiki snapshot: {path}")
-    return resolved.as_uri()
+        raise ValueError("A slide image must be a file inside the project")
+    file = project_directory(root, Path(path).parent, label="Image") / Path(path).name
+    if file.is_symlink() or not file.is_file() or _sha(file) != image.get("sha256"):
+        raise ValueError(f"The slide image {path} is missing or changed after the storyboard was imported")
+    return file.as_uri()
 
 
 def _references(storyboard: dict) -> str:
-    lines = [f"# References — {storyboard['document']['title']}", "",
-             f"Document: {storyboard['document']['url']}", "",
-             f"PostgreSQL source commit: `{storyboard['document']['pinned_commit']}`", ""]
+    document = storyboard["document"]
+    lines = [f"# References — {storyboard['title']}", "",
+             f"Document: {document.get('url') or document['path']} (PostgreSQL {document['version']})", ""]
     seen = set()
     for scene in storyboard["scenes"]:
         links = [item for item in scene.get("citations", []) if isinstance(item, dict)]
-        for sentence in scene["narration"]:
-            links += [item for item in sentence.get("citations", []) if isinstance(item, dict)]
         fresh = []
         for link in links:
             url = link.get("url")
@@ -125,9 +119,9 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
                 page.route("https://**/*", lambda route: route.abort())
                 for index, (scene, timing) in enumerate(zip(storyboard["scenes"], timeline["scenes"]), 1):
                     screen = scene["screen"]
-                    image_url = _image(root, run_dir, storyboard, screen)
-                    note = f"{storyboard['document']['path']} @ {storyboard['document']['wiki_commit'][:12]}"
-                    # An edge names its nodes by ID; the slide shows their labels, as the review reads them.
+                    image_url = _image(root, screen)
+                    note = storyboard["document"]["path"]
+                    # An edge names its nodes by ID; the slide shows their labels.
                     node_labels = {node["id"]: node["label"]
                                    for node in (screen.get("diagram") or {}).get("nodes", [])}
                     html = template.render(font_url=font_url, mono_url=mono_url, layout=screen["layout"],
@@ -163,7 +157,7 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
 
 
 def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: int = 192) -> dict:
-    """Build a draft MP4; Step 11 validates it before delivery."""
+    """Build a draft MP4; validation checks it before delivery."""
     # libopus accepts at most 256 kb/s for one channel.
     if not 0 <= crf <= 51 or not 32 <= audio_bitrate <= 256:
         raise ValueError("CRF must be 0–51 and audio bitrate must be 32–256 kb/s")
@@ -172,8 +166,7 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: in
     try:
         timing_stage, script_stage = manifest.get("timing") or {}, manifest.get("script") or {}
         if timing_stage.get("status") != "passed" or script_stage.get("status") != "passed":
-            raise ValueError("Script and timing must pass before rendering")
-        require_content_gate(run_dir, manifest)
+            raise ValueError("The storyboard and timing must pass before rendering")
         timeline_path, storyboard_path = run_dir / "timeline.json", run_dir / "storyboard.json"
         if _sha(timeline_path) != timing_stage["sha256"] or _sha(storyboard_path) != script_stage["sha256"]:
             raise ValueError("Storyboard or timeline changed after validation; rerun timing")

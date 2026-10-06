@@ -13,10 +13,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .orchestration import is_harness, require_content_gate, require_duration
-from .paths import project_directory
+from .paths import project_directory, write_atomic
 from .reuse import register, stage_fingerprint
-from .sources import write_atomic
 from .stages import invalidate_after
 from .timing import _timestamp
 
@@ -81,28 +79,12 @@ def validate_video(root: Path, run_dir: Path) -> dict:
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     invalidate_after(manifest, "validation")
-    report: dict = {"schema": 1, "request_id": run_dir.name,
-                    "created_at": datetime.now(timezone.utc).isoformat(), "status": "failed", "checks": {},
-                    "listening_review": "pending: technical terms, transitions, and ending"}
+    report: dict = {"schema": 2, "request_id": run_dir.name,
+                    "created_at": datetime.now(timezone.utc).isoformat(), "status": "failed", "checks": {}}
     try:
-        for stage in ("render", "timing", "narration", "script", "sources", "glossary_check"):
+        for stage in ("render", "timing", "narration", "script"):
             if (manifest.get(stage) or {}).get("status") != "passed":
                 raise ValueError(f"The {stage} stage must pass before validation")
-        harness = is_harness(run_dir)
-        if harness:
-            # A harness video is delivered only with its accepted plan and a passed separate review of this storyboard.
-            require_content_gate(run_dir, manifest)
-            require_duration(run_dir, manifest)
-            for name, stage in (("plan.json", "plan"), ("content-review.json", "content_review"),
-                                ("evidence-packet.json", "evidence")):
-                if _sha(run_dir / name) != manifest[stage]["sha256"]:
-                    raise ValueError(f"Validated input changed: {name}")
-            review = manifest["content_review"]
-            report["checks"]["content"] = {
-                "workflow": "harness", "plan": manifest["plan"]["digest"], "review": review["digest"],
-                "review_policy": review["policy"], "reviewer_separation": review["reviewer"]["separation"],
-                "verdicts": review["counts"]["verdicts"], "minor_findings": review["counts"]["minor"],
-                "duration": manifest["narration"].get("duration_check")}
         render = json.loads((run_dir / "render.json").read_text())
         timeline = json.loads((run_dir / "timeline.json").read_text())
         audio_map = json.loads((run_dir / "narration/audio-map.json").read_text())
@@ -199,20 +181,12 @@ def validate_video(root: Path, run_dir: Path) -> dict:
             raise NeedsReview(f"Encoded audio loudness is outside delivery limits: {loudness}")
         report["checks"]["loudness"] = loudness
         output_base = project_directory(root, Path(request["settings"]["output_dir"]), label="Output")
-        destination = project_directory(root, run_dir / "delivery" if harness else output_base / run_dir.name,
-                                        label="Prepared delivery" if harness else "Output")
+        destination = project_directory(root, output_base / run_dir.name, label="Output")
         destination.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^a-z0-9]+", "-", Path(request["document"]["path"]).stem.lower()).strip("-") or "video"
-        # A summary or full-detail video names its level, so copies of each level can sit side by side.
-        detail = (storyboard.get("settings") or {}).get("detail", "standard")
-        if detail != "standard":
-            slug = f"{slug}-{detail}"
+        slug = re.sub(r"[^a-z0-9]+", "-", Path(storyboard["document"]["path"]).stem.lower()).strip("-") or "video"
         files = {f"{slug}.mp4": draft, "transcript.md": run_dir / "script.md",
                  "captions.srt": run_dir / "captions.srt", "captions.vtt": run_dir / "captions.vtt",
-                 "references.md": run_dir / "references.md", "glossary-check.md": run_dir / "glossary-check.md"}
-        if harness:
-            files |= {"content-report.md": run_dir / "content-report.md", "plan.md": run_dir / "plan-report.md",
-                      "orchestration.json": run_dir / "orchestration.json"}
+                 "references.md": run_dir / "references.md"}
         for name, source in files.items():
             target = destination / name
             temporary = destination / f".{name}.tmp"
@@ -220,11 +194,10 @@ def validate_video(root: Path, run_dir: Path) -> dict:
                 raise ValueError(f"Delivery path is a symlink: {name}")
             shutil.copyfile(source, temporary)
             temporary.replace(target)
-        report["status"] = "passed" if harness else "completed"
-        report["media_review"] = "pending" if harness else "not_required_legacy_request"
+        report["status"] = "completed"
         report["delivery"] = {"directory": str(destination), "files": {name: _sha(destination / name)
                                                                    for name in files}}
-        report["document"] = {"url": storyboard["document"]["url"],
+        report["document"] = {"path": storyboard["document"]["path"], "url": storyboard["document"].get("url"),
                               "postgresql_version": storyboard["document"]["version"]}
         report["duration_seconds"] = duration
         report["fingerprint"] = stage_fingerprint(root)
@@ -234,7 +207,7 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         write_atomic(root, run_dir.relative_to(root) / "quality-report.json",
                      (json.dumps(report, indent=2) + "\n").encode(), label="Request")
         shutil.copyfile(run_dir / "quality-report.json", destination / "quality-report.json")
-        manifest["status"] = "media_review_pending" if harness else "completed"
+        manifest["status"] = "completed"
         manifest["validation"] = {"status": report["status"], "record": "quality-report.json",
                                   "sha256": _sha(run_dir / "quality-report.json"),
                                   "output": str(destination.relative_to(root)), "video": f"{slug}.mp4",
@@ -256,61 +229,3 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         write_atomic(root, run_dir.relative_to(root) / "manifest.json",
                      (json.dumps(manifest, indent=2) + "\n").encode(), label="Request")
         raise
-
-
-def deliver_reviewed(root: Path, run_dir: Path) -> dict:
-    """Publish the prepared package only after inspection of its exact video has passed."""
-    from .media_review import inspection_inputs
-
-    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    require_content_gate(run_dir, manifest)
-    require_duration(run_dir, manifest)
-    inspection_inputs(run_dir, manifest)
-    media = manifest.get("media_review") or {}
-    if (media.get("status") != "passed" or media.get("video_sha256") != manifest["render"]["draft_sha256"] or
-            media.get("storyboard_digest") != manifest["script"]["digest"]):
-        raise ValueError("The finished-video review must pass before delivery.")
-    if _sha(run_dir / "media-review.json") != media["sha256"] or _sha(run_dir / "render/draft.mp4") != media["video_sha256"]:
-        raise ValueError("The reviewed video or review changed before delivery.")
-    validation = manifest["validation"]
-    if _sha(run_dir / "quality-report.json") != validation["sha256"]:
-        raise ValueError("The quality report changed after automated validation.")
-    report = json.loads((run_dir / "quality-report.json").read_text(encoding="utf-8"))
-    prepared = project_directory(root, root / validation["output"], label="Prepared delivery")
-    # Validate every prepared member before publishing anything.
-    files = {}
-    for name, digest in report["delivery"]["files"].items():
-        if Path(name).name != name:
-            raise ValueError(f"Invalid prepared delivery member: {name}.")
-        path = prepared / name
-        if path.is_symlink() or _sha(path) != digest:
-            raise ValueError(f"Prepared delivery member changed after validation: {name}.")
-        files[name] = path
-    files["media-review.json"] = run_dir / "media-review.json"
-    files["orchestration.json"] = run_dir / "orchestration.json"
-    request = json.loads((run_dir / "request.json").read_text(encoding="utf-8"))
-    output_base = project_directory(root, Path(request["settings"]["output_dir"]), label="Output")
-    destination = project_directory(root, output_base / run_dir.name, label="Output")
-    destination.mkdir(parents=True, exist_ok=True)
-    for name in (*files, "quality-report.json", "manifest.json"):
-        if (destination / name).is_symlink() or (destination / f".{name}.tmp").is_symlink():
-            raise ValueError(f"Delivery path is a symlink: {name}.")
-    for name, source in files.items():
-        temporary = destination / f".{name}.tmp"
-        shutil.copyfile(source, temporary)
-        temporary.replace(destination / name)
-    report.update(status="completed", listening_review="passed: all scenes", media_review="passed")
-    report["delivery"] = {"directory": str(destination),
-                          "files": {name: _sha(destination / name) for name in files}}
-    report["checks"]["media_review"] = {"sha256": media["sha256"], "video_sha256": media["video_sha256"]}
-    write_atomic(root, run_dir.relative_to(root) / "quality-report.json",
-                 (json.dumps(report, indent=2) + "\n").encode(), label="Request")
-    shutil.copyfile(run_dir / "quality-report.json", destination / "quality-report.json")
-    validation.update(status="completed", output=str(destination.relative_to(root)),
-                      sha256=_sha(run_dir / "quality-report.json"))
-    media["status"] = "completed"
-    manifest["status"] = "completed"
-    write_atomic(root, run_dir.relative_to(root) / "manifest.json",
-                 (json.dumps(manifest, indent=2) + "\n").encode(), label="Request")
-    shutil.copyfile(run_dir / "manifest.json", destination / "manifest.json")
-    return media

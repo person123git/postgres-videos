@@ -51,9 +51,9 @@ DIRECTORIES = (
 PASSTHROUGH = ("GITHUB_TOKEN", "HF_TOKEN", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
                "https_proxy", "http_proxy", "no_proxy")
 
-# Commands that download; every other command, and setup --offline, runs with IP networking denied.
-# Model inference is the external harness's job; no pgvideo command calls a model or carries its credentials.
-NETWORK_COMMANDS = {"setup", "prepare"}
+# The command that downloads; every other command, and setup --offline, runs with IP networking denied.
+# Writing a video's content is its author's job; no pgvideo command calls a model or carries its credentials.
+NETWORK_COMMANDS = {"setup"}
 # Operating system locations a sandboxed command may use besides the project.
 # Landlock attaches a rule to the file or directory a path resolves to, so /lib, /lib64, and /bin
 # are covered where they are links into /usr. Paths a host lacks are skipped.
@@ -914,13 +914,13 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
             f"Linux x86_64 with Landlock ABI {LANDLOCK_MINIMUM_ABI} (Linux 6.7 or newer), seccomp filters, and glibc "
             f"{lock['platform']['minimum_glibc']} or newer",
             "reading " + ", ".join(description for _, description in OS_READS),
-            "reading, for setup and prepare only, " + ", ".join(description for _, description in NETWORK_READS),
+            "reading, for setup only, " + ", ".join(description for _, description in NETWORK_READS),
             "writing " + ", ".join(description for _, description in OS_WRITES),
             "running " + ", ".join(OS_EXECUTABLES) + " for the launcher scripts and dynamically linked programs",
             "the system libraries headless Chromium links to; checks.native_binaries fails when one is missing",
             "system services reached over Unix-domain sockets, such as systemd-resolved for DNS",
-            "network access for setup and prepare: GitHub, PyPI, download.pytorch.org, Hugging Face, the Playwright "
-            "CDN, and the FFmpeg build host",
+            "network access for setup: GitHub, PyPI, download.pytorch.org, Hugging Face, the Playwright CDN, and "
+            "the FFmpeg build host",
             "bootstrap before the sandbox starts: " + ", ".join(BOOTSTRAP_TOOLS),
             "the platform null device for PIP_CONFIG_FILE and OPENSSL_CONF",
         ],
@@ -930,8 +930,8 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
             "/proc is readable, including the entries other processes leave readable to every user.",
             "Unix-domain sockets, signals, and other local IPC are not restricted; system services such as "
             "systemd-resolved and D-Bus act for the process.",
-            "Offline commands cannot create IPv4 or IPv6 sockets and cannot bind or connect TCP sockets; setup and "
-            "prepare may reach any host.",
+            "Offline commands cannot create IPv4 or IPv6 sockets and cannot bind or connect TCP sockets; setup may "
+            "reach any host.",
             "Landlock denies an access with an error and does not terminate the process, and only the kernel audit "
             "log, which needs administrator rights, records denied attempts. No command audits them.",
             "scripts/setup downloads, verifies, and unpacks the Python runtime and creates .venv before the sandbox applies.",
@@ -950,8 +950,8 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
 
 def main() -> int:
     if not sys.argv[1:]:
-        raise EnvironmentError("use scripts/pgvideo doctor, test, prepare --document ..., "
-                               "status --request ..., or another command in AGENTS.md")
+        raise EnvironmentError("use scripts/pgvideo doctor, test, build --storyboard ..., "
+                               "or another command in README.md")
     create_directories()
     restart_clean(sys.argv[1])
     lock = read_lock()

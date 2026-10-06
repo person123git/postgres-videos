@@ -1,8 +1,6 @@
-"""Load harness-authored files and validate them against the versioned JSON Schemas in schemas/.
+"""Load an authored file and validate it against a versioned JSON Schema in schemas/.
 
-A schema says an artifact is well formed; it does not make its content correct.
-pgvideo's own checks resolve every ID, compare quotes and values with the
-snapshot, and assign every status after the schema passes.
+A schema says a file is well formed; it does not make its content correct.
 """
 
 from __future__ import annotations
@@ -15,10 +13,22 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
-from .markdown import MarkdownError, _FrontMatterLoader
 from .paths import project_directory
 
 MAX_ERRORS = 25
+
+
+class AliasError(ValueError):
+    """YAML that cannot be read safely."""
+
+
+class SafeLoader(yaml.SafeLoader):
+    """A safe loader that also rejects aliases, which can expand exponentially."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise AliasError("YAML aliases are not allowed")
+        return super().compose_node(parent, index)
 
 
 def schema(root: Path, name: str) -> dict:
@@ -87,8 +97,8 @@ def parse(data: bytes, where: str):
     except UnicodeDecodeError as error:
         raise ValueError(f"{where} is not UTF-8.") from error
     try:
-        return json.loads(text) if text.lstrip().startswith("{") else yaml.load(text, Loader=_FrontMatterLoader)
-    except MarkdownError as error:
+        return json.loads(text) if text.lstrip().startswith("{") else yaml.load(text, Loader=SafeLoader)
+    except AliasError as error:
         raise ValueError(f"{where} must not use YAML aliases.") from error
     except (json.JSONDecodeError, yaml.YAMLError) as error:
         raise ValueError(f"{where} is not valid JSON or YAML: {error}") from error

@@ -1,4 +1,4 @@
-"""Turn a script sentence's display text into the text Kokoro speaks (Step 7).
+"""Turn a storyboard sentence's display text into the text Kokoro speaks.
 
 The script keeps two texts for every narrated sentence. Display text is the
 canonical spelling that the screen and the captions show, with inline code in
@@ -11,14 +11,18 @@ live in pronunciation/en.yaml, whose SHA-256 the storyboard records.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+import json
 import re
 from pathlib import Path
 
 import yaml
 
-from .markdown import MarkdownError, _FrontMatterLoader
+from .contracts import AliasError, SafeLoader
 
 DICTIONARY = Path("pronunciation") / "en.yaml"
+# Kokoro's English pronunciation lexicons, installed with its phonemizer.
+LEXICON_PACKAGE, LEXICON_FILES = "misaki", ("data/us_gold.json", "data/us_silver.json")
 SECTIONS = ("terms", "parts", "abbreviations", "units")
 
 CODE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
@@ -49,6 +53,21 @@ UNSPEAKABLE = re.compile(r"[`_*\\{}\[\]<>|#$@^~=]|https?://|www\.")
 
 class PronunciationError(ValueError):
     """The pronunciation dictionary is missing or invalid."""
+
+
+def english_words() -> frozenset[str]:
+    """Return the lowercase words of Kokoro's English pronunciation lexicons."""
+    spec = importlib.util.find_spec(LEXICON_PACKAGE)
+    if spec is None or not spec.submodule_search_locations:
+        raise ValueError(f"The local {LEXICON_PACKAGE} package is missing; run scripts/setup.")
+    base = Path(next(iter(spec.submodule_search_locations)))
+    files = [base / name for name in LEXICON_FILES]
+    if missing := [str(path) for path in files if not path.is_file()]:
+        raise ValueError(f"The English lexicon files are missing: {', '.join(missing)}; run scripts/setup.")
+    words: set[str] = set()
+    for path in files:
+        words.update(word.lower() for word in json.loads(path.read_bytes()))
+    return frozenset(words)
 
 
 class Pronunciation:
@@ -96,13 +115,11 @@ class Pronunciation:
             raise PronunciationError(f"The pronunciation dictionary {DICTIONARY} is missing.")
         data = path.read_bytes()
         try:
-            loaded = yaml.load(data.decode("utf-8"), Loader=_FrontMatterLoader)
-        except MarkdownError as error:
+            loaded = yaml.load(data.decode("utf-8"), Loader=SafeLoader)
+        except AliasError as error:
             raise PronunciationError(f"{DICTIONARY} must not use YAML aliases.") from error
         except (yaml.YAMLError, UnicodeDecodeError) as error:
             raise PronunciationError(f"{DICTIONARY} is not valid UTF-8 YAML: {error}") from error
-        from .glossary import english_words
-
         try:
             words = english_words()
         except ValueError as error:

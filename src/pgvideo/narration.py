@@ -14,9 +14,8 @@ import numpy as np
 import soundfile as sf
 
 from .assets import _checked_path, local_kokoro, local_selection
-from .orchestration import duration_check, require_content_gate
+from .paths import write_atomic
 from .reuse import stage_fingerprint
-from .sources import write_atomic
 from .speech import Pronunciation
 from .stages import invalidate_after
 
@@ -156,17 +155,16 @@ def _create_narration(root: Path, run_dir: Path, *, loudness: float, peak: float
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("script", {}).get("status") != "passed":
-        raise ValueError("The script must pass before narration; review script.md")
-    require_content_gate(run_dir, manifest)
+        raise ValueError("The storyboard must be imported before narration; review script.md")
     storyboard_path = run_dir / "storyboard.json"
     if _sha(storyboard_path) != manifest["script"]["sha256"]:
-        raise ValueError("storyboard.json changed after validation; rerun the script stage")
+        raise ValueError("storyboard.json changed after it was imported; import the storyboard again")
     storyboard = json.loads(storyboard_path.read_text(encoding="utf-8"))
     if not storyboard.get("scenes") or any(not scene.get("narration") for scene in storyboard["scenes"]):
         raise ValueError("Every storyboard scene must contain narration")
     pronunciation_path = root / storyboard["pronunciation"]["file"]
     if _sha(pronunciation_path) != storyboard["pronunciation"]["sha256"]:
-        raise ValueError("The pronunciation dictionary changed; rerun the script stage")
+        raise ValueError("The pronunciation dictionary changed; import the storyboard again")
     request = json.loads((run_dir / "request.json").read_text(encoding="utf-8"))
     settings = request["settings"]
     _, assets = local_selection(language=settings["language"], voice=settings["voice"])
@@ -281,10 +279,6 @@ def publish(root: Path, run_dir: Path, manifest: dict, record: dict) -> dict:
                               "units": units, "fingerprint": record.get("fingerprint")}
     if reused_from:
         manifest["narration"]["reused_from"] = reused_from
-    # A harness request compares the measured length with its target before timing and rendering.
-    if (check := duration_check(run_dir, record["duration_seconds"],
-                                (manifest.get("script") or {}).get("digest"))) is not None:
-        manifest["narration"]["duration_check"] = check
     write_atomic(root, run_dir.relative_to(root) / "manifest.json",
                  (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode(), label="Request")
     return manifest["narration"]

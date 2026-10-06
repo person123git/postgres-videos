@@ -1,21 +1,13 @@
-"""Key completed videos by their inputs and reuse one only when every input matches (Step 12).
+"""Key completed videos by their inputs and reuse one only when every input matches.
 
-Accepted harness content is keyed separately (see the end of this module): its
-key covers the evidence, the phase prompts, the schemas, and the review policy,
-never the request, so a later request can replay the accepted plan, storyboard,
-and review through the ordinary validators without new inference. A video's key
-covers only what the media depends on, so identical accepted scenes reuse media
-while a changed review policy still forces a new content review first.
-
-
-A video's key covers the snapshot inputs (the document, the glossary, wiki images,
-and the cited PostgreSQL files, with the wiki commit and the source pin), the
-storyboard without its request-specific fields, the pronunciation dictionary, the
-voice, speed, and loudness settings, the Kokoro assets, the render settings, and
-the SHA-256 of the locks, template, fonts, and media code. Step 11 registers each
-validated video as cache/videos/<key>/<request-id>.json. When a later script has
-the same key, the registered narration and MP4 are verified, copied into the new
-request, and checked again by that request's own timing and validation stages.
+A video's key covers the imported storyboard without its request-specific fields
+(its scenes, with the SHA-256 of every slide image), the pronunciation
+dictionary, the voice, speed, and loudness settings, the Kokoro assets, the
+render settings, and the SHA-256 of the locks, template, fonts, and media code.
+Validation registers each video as cache/videos/<key>/<request-id>.json. When a
+later storyboard has the same key, the registered narration and MP4 are verified,
+copied into the new request, and checked again by that request's own timing and
+validation stages.
 """
 
 from __future__ import annotations
@@ -29,11 +21,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .orchestration import AUTHORED, REVIEW_POLICY, prompt_hashes, require_content_gate, schema_hashes
-from .paths import REQUEST_ID, project_directory
-from .sources import write_atomic
+from .paths import REQUEST_ID, project_directory, write_atomic
 
-SCHEMA = 1
+SCHEMA = 2
 INDEX = Path("cache/videos")
 AUDIO_MAP = "narration/audio-map.json"
 RENDER = "render.json"
@@ -45,10 +35,10 @@ MODULES = ("assets.py", "speech.py", "narration.py", "timing.py", "render.py", "
 # Stages that record the tools they ran with; validation compares them with its own.
 RECORDED_STAGES = ("narration", "timing", "render")
 # Storyboard fields that differ between requests for the same content.
-REQUEST_FIELDS = ("request_id", "created_at", "drafter", "inputs")
-# A harness storyboard's estimates follow the measured speech rate, which changes as more narration is measured;
-# they are left out so the same accepted scenes keep one digest, one review, and one video.
-ESTIMATE_FIELDS = ("status", "settings", "estimate", "counts", "issues", "semantic_review")
+REQUEST_FIELDS = ("request_id", "created_at", "source")
+# A storyboard's estimates follow the measured speech rate, which changes as more narration is measured;
+# they are left out so the same scenes keep one digest and one video.
+ESTIMATE_FIELDS = ("status", "settings", "estimate", "counts", "issues")
 MEDIA_FILE = re.compile(r"narration/(?:units/[A-Za-z0-9][A-Za-z0-9._-]*\.wav|master(?:-raw)?\.wav)"
                         r"|render/(?:slides/\d{3,4}\.(?:png|html)|slides\.ffconcat|draft\.mp4)|references\.md")
 REQUIRED_FILES = ("narration/master.wav", "narration/master-raw.wav", "render/draft.mp4", "references.md")
@@ -122,40 +112,17 @@ def stage_fingerprint(root: Path) -> str | None:
 
 
 def script_sha256(storyboard: dict) -> str:
-    """Hash a storyboard without the fields that differ between requests for the same content.
-
-    The storyboard's document record keeps the wiki commit, which the slides and
-    references show, so a video is reused only for the same wiki commit.
-    """
-    content = {key: value for key, value in storyboard.items() if key not in REQUEST_FIELDS}
-    if storyboard.get("workflow") == "harness":
-        content = {key: value for key, value in content.items() if key not in ESTIMATE_FIELDS}
-        content["scenes"] = [{key: value for key, value in scene.items() if key != "estimated_seconds"}
-                             for scene in content.get("scenes", [])]
+    """Hash a storyboard without the fields that differ between requests for the same content."""
+    content = {key: value for key, value in storyboard.items() if key not in (*REQUEST_FIELDS, *ESTIMATE_FIELDS)}
+    content["scenes"] = [{key: value for key, value in scene.items() if key != "estimated_seconds"}
+                         for scene in content.get("scenes", [])]
     return _digest(content)
 
 
-def _one(inputs: list[dict], role: str) -> dict:
-    found = [entry for entry in inputs if entry["role"] == role]
-    if len(found) != 1:
-        raise ValueError(f"The source snapshot records {len(found)} {role} input(s).")
-    return found[0]
-
-
-def components(manifest: dict, storyboard: dict, *, narration: dict, render: dict, tools: dict) -> dict:
+def components(storyboard: dict, *, narration: dict, render: dict, tools: dict) -> dict:
     """Return every input a completed video depends on; the video's key is their SHA-256."""
-    sources = manifest["sources"]
-    inputs = sorted(({key: entry[key] for key in ("role", "repository", "commit", "path", "sha256")}
-                     for entry in sources["inputs"]), key=lambda entry: (entry["repository"], entry["path"]))
-    document, glossary = _one(inputs, "document"), _one(inputs, "glossary")
     return {
         "schema": SCHEMA,
-        "document": {"path": document["path"], "sha256": document["sha256"]},
-        "glossary": {"path": glossary["path"], "sha256": glossary["sha256"]},
-        "sources": {"wiki_commit": sources["wiki"]["commit"],
-                    "postgres": {"version": sources["postgres"].get("version"),
-                                 "commit": sources["postgres"].get("commit")},
-                    "inputs": inputs},
         "script": script_sha256(storyboard),
         "pronunciation": storyboard["pronunciation"]["sha256"],
         "narration": narration,
@@ -184,7 +151,7 @@ def planned_key(root: Path, run_dir: Path, manifest: dict, *, loudness: float, p
     kokoro = json.loads((root / "tools.lock").read_text(encoding="utf-8"))["kokoro"]
     assets = {"model": kokoro["model"]["sha256"], "config": kokoro["config"]["sha256"],
               "voice_asset": kokoro["voice"]["sha256"]}
-    parts = components(manifest, storyboard,
+    parts = components(storyboard,
                        narration=_narration(settings, loudness=loudness, peak=peak, assets=assets),
                        render=_render(settings["width"], settings["height"], FPS, crf, audio_bitrate),
                        tools=tools(root))
@@ -316,14 +283,13 @@ def _copy(root: Path, video: Video, run_dir: Path, relative: str) -> None:
 
 
 def reuse_narration(root: Path, run_dir: Path, video: Video) -> dict:
-    """Copy a registered video's narration into this request and record it as this request's Step 8."""
+    """Copy a registered video's narration into this request and record it as this request's narration."""
     from .narration import publish
 
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     script = manifest.get("script") or {}
     if script.get("status") != "passed":
-        raise ReuseError("The script must pass before narration")
-    require_content_gate(run_dir, manifest)
+        raise ReuseError("The storyboard must be imported before narration")
     record = _source_record(root, video, AUDIO_MAP)
     for relative in video.entry["files"]:
         if relative.startswith("narration/"):
@@ -388,7 +354,7 @@ def register(root: Path, run_dir: Path, manifest: dict, *, storyboard: dict, aud
         if stale := [stage for stage, digest in recorded.items() if digest != current["sha256"]]:
             raise ReuseError(f"{_stages(stale)} ran with other tools or code than this validation")
         normalization = audio_map["normalization"]
-        parts = components(manifest, storyboard,
+        parts = components(storyboard,
                            narration=_narration(audio_map["settings"], loudness=normalization["target_lufs"],
                                                 peak=normalization["target_true_peak_dbtp"],
                                                 assets=audio_map["assets"]),
@@ -413,7 +379,8 @@ def register(root: Path, run_dir: Path, manifest: dict, *, storyboard: dict, aud
                 raise ReuseError(f"{relative} changed after its stage recorded it")
         entry = {"schema": SCHEMA, "key": key, "request_id": run_dir.name, "registered_at": _now(),
                  "components": parts,
-                 "document": {name: storyboard["document"].get(name) for name in ("path", "title", "url", "version")},
+                 "document": {"title": storyboard.get("title"),
+                              **{name: storyboard["document"].get(name) for name in ("path", "url", "version")}},
                  "records": records, "files": files,
                  "video": {"file": render["draft"], "sha256": render["sha256"], "frames": render["frames"]}}
         relative = INDEX / key / f"{run_dir.name}.json"
@@ -421,68 +388,3 @@ def register(root: Path, run_dir: Path, manifest: dict, *, storyboard: dict, aud
     except (ValueError, OSError, KeyError, TypeError) as error:
         return reuse | {"registered": False, "reason": str(error)}
     return reuse | {"registered": True, "index": relative.as_posix()}
-
-
-# Accepted harness content -----------------------------------------------------------------------
-
-CONTENT_INDEX = Path("cache/content")
-CONTENT_FILES = ("plan.json", "storyboard.json", "review.json")
-
-
-def content_components(root: Path, manifest: dict) -> dict:
-    """What accepted content depends on; the harness model is recorded separately, as it may be unknown."""
-    return {"schema": SCHEMA, "evidence": (manifest.get("evidence") or {}).get("digest"),
-            "prompts": prompt_hashes(root), "schemas": schema_hashes(root), "review_policy": REVIEW_POLICY}
-
-
-def register_content(root: Path, run_dir: Path) -> dict:
-    """Register a request's accepted plan, storyboard, and review for replay by later requests."""
-    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    try:
-        parts = content_components(root, manifest)
-        key = _digest(parts)
-        files = {}
-        for name in CONTENT_FILES:
-            path = _authored(root, run_dir, name)
-            files[name] = _sha(path)
-        entry = {"schema": SCHEMA, "key": key, "components": parts, "request_id": run_dir.name,
-                 "registered_at": _now(), "files": files,
-                 "digests": {stage: (manifest.get(stage) or {}).get("digest") for stage in ("plan", "script",
-                                                                                              "content_review")}}
-        write_atomic(root, CONTENT_INDEX / key / f"{run_dir.name}.json", _json_bytes(entry), label="Content cache")
-    except (ValueError, OSError, KeyError, TypeError) as error:
-        return {"registered": False, "reason": str(error)}
-    return {"registered": True, "key": key}
-
-
-def find_content(root: Path, run_dir: Path) -> list[str]:
-    """Return earlier requests whose accepted content was made from the same evidence, prompts, and policy."""
-    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    if not (manifest.get("evidence") or {}).get("digest"):
-        return []
-    key = _digest(content_components(root, manifest))
-    try:
-        directory = project_directory(root, CONTENT_INDEX / key, label="Content cache")
-    except ValueError:
-        return []
-    found = []
-    for path in sorted(directory.glob("*.json"), key=lambda p: -p.stat().st_mtime) if directory.is_dir() else []:
-        try:
-            entry = json.loads(path.read_bytes())
-            source = project_directory(root, Path("runs") / entry["request_id"], label="Request")
-            if entry.get("key") != key or entry["request_id"] == run_dir.name or entry["request_id"] != path.stem:
-                continue
-            if all(_sha(_authored(root, source, name)) == digest for name, digest in entry["files"].items()):
-                found.append(entry["request_id"])
-        except (ValueError, OSError, KeyError, TypeError):
-            continue
-    return found
-
-
-def _authored(root: Path, run_dir: Path, name: str) -> Path:
-    if name not in CONTENT_FILES:
-        raise ReuseError(f"{name!r} is not an accepted harness file")
-    path = project_directory(root, run_dir / AUTHORED, label="Request") / name
-    if path.is_symlink() or not path.is_file():
-        raise ReuseError(f"{AUTHORED}/{name} is missing from {run_dir.name}")
-    return path

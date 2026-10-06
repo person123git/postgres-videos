@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
+import tempfile
 from collections import deque
 from pathlib import Path
 
@@ -69,3 +71,20 @@ def project_directory(root: Path, path: Path, *, label: str) -> Path:
             raise ValueError(f"{label} path '{path}' contains a non-directory: '{candidate}'.")
         resolved = candidate
     return resolved
+
+
+def write_atomic(root: Path, relative: Path, data: bytes, *, label: str) -> Path:
+    """Write bytes under a project directory checked for escapes, replacing any old file."""
+    parent = project_directory(root, relative.parent, label=label)
+    parent.mkdir(parents=True, exist_ok=True)
+    target = parent / relative.name
+    descriptor, temporary = tempfile.mkstemp(dir=parent, prefix=f".{relative.name[:40]}.", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return target
