@@ -159,29 +159,9 @@ def parser() -> argparse.ArgumentParser:
     excerpt.add_argument("--path", required=True, help="file path in the PostgreSQL snapshot, such as "
                                                        "src/backend/utils/misc/guc_tables.c")
     excerpt.add_argument("--lines", required=True, help="line range such as 120-160")
-    packet = request_command("packet", "print a complete view of the request's evidence packet: its index, "
-                                       "sections, the whole document, evidence by ID, glossary entries, or "
-                                       "configuration facts")
-    piece = packet.add_mutually_exclusive_group()
-    piece.add_argument("--section", nargs="+", metavar="ID",
-                       help="the blocks of one or more sections, with the evidence and glossary IDs their "
-                            "units use")
-    piece.add_argument("--document", action="store_true",
-                       help="every section with content, in page order, and the sections the packet leaves out")
-    piece.add_argument("--evidence", nargs="+", metavar="ID", help="excerpts or configuration facts by evidence "
-                                                                   "ID, such as pg:<path>#L<a>-L<b> or guc:<setting>")
-    piece.add_argument("--glossary", nargs="*", metavar="TERM",
-                       help="glossary candidates; with terms, anchors, or glossary:<anchor> IDs, those entries in "
-                            "full")
-    piece.add_argument("--settings", action="store_true", help="the configuration facts parsed from the pinned "
-                                                               "GUC table")
-    piece.add_argument("--omissions-template", action="store_true",
-                       help="a `revise` patch that omits, with empty reasons to fill in, every eligible section "
-                            "the plan given with --plan leaves unaccounted (every eligible section without --plan)")
-    packet.add_argument("--plan", type=Path, help="plan input file for --omissions-template")
-    packet.add_argument("--text", action="store_true",
-                        help="with --section or --document: text to read in page order, one sentence, row, or "
-                             "block per line with its unit ID, instead of JSON")
+    omissions = request_command("omissions-template", "print a `revise` patch that omits, with empty reasons to "
+                                                       "fill in, every eligible section a plan leaves unaccounted")
+    omissions.add_argument("--plan", type=Path, help="plan input file; without it, every eligible section is listed")
     revise = subcommands.add_parser(
         "revise", help="apply a small patch to a plan, storyboard, or review input file and write the result as a "
                        "new revision, so a repair never retypes the file")
@@ -692,46 +672,32 @@ def excerpt(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def packet(args: argparse.Namespace, root: Path) -> int:
-    """Print a complete view of the evidence packet."""
+def omissions_template(args: argparse.Namespace, root: Path) -> int:
+    """Print the `revise` patch that omits the eligible sections a plan leaves unaccounted."""
+    from . import contracts
     from .evidence import packet as load_packet
-    from .packet import text, view
+    from .planning import omissions_template as template
 
     try:
         run_dir, manifest = _request(root, args.request)
-        if args.plan and not args.omissions_template:
-            raise ValueError("--plan is only used with --omissions-template.")
-        if args.text and not (args.section or args.document):
-            raise ValueError("--text renders sections: give --section <id>… or --document.")
-        if args.text:
-            # Lines, not JSON: a reader pages through them, and a harness does not cut one long line.
-            print(text(load_packet(run_dir, manifest), args.section), end="")
-            print("Complete evidence packet view.", file=sys.stderr)
-            return 0
-        if args.omissions_template:
-            from . import contracts
-            from .planning import omissions_template
-
-            plan_file = contracts.project_file(root, args.plan, label="Plan file") if args.plan else None
-            raw = contracts.parse(plan_file.read_bytes(), str(args.plan)) if plan_file else None
-            found = omissions_template(root, run_dir, load_packet(run_dir, manifest), raw)
-        else:
-            found = view(load_packet(run_dir, manifest), section=args.section, evidence=args.evidence,
-                         glossary=args.glossary, settings=args.settings, document=args.document)
+        plan_file = contracts.project_file(root, args.plan, label="Plan file") if args.plan else None
+        raw = contracts.parse(plan_file.read_bytes(), str(args.plan)) if plan_file else None
+        found = template(root, run_dir, load_packet(run_dir, manifest), raw)
     except (ValueError, OSError, KeyError) as error:
         if args.json:
-            print(json.dumps({"request_id": args.request, "stage": "packet", "status": "failed", "artifacts": [],
-                              "issues": [{"severity": "blocking", "code": "packet", "message": str(error)}],
+            print(json.dumps({"request_id": args.request, "stage": "omissions-template", "status": "failed",
+                              "artifacts": [],
+                              "issues": [{"severity": "blocking", "code": "omissions_template",
+                                          "message": str(error)}],
                               "next_actions": [], "message": f"pgvideo: {error}"}, indent=2, ensure_ascii=False))
         else:
             print(f"pgvideo: {error}", file=sys.stderr)
         return 1
-    message = "Complete evidence packet view."
-    # Compact, unlike other results: indentation is about a third of the packet's size. Reading changes nothing,
-    # so the result is not kept as the request's last result.
-    result = {"request_id": run_dir.name, "stage": "packet", "status": "passed", "artifacts": [], "issues": [],
-              "next_actions": [], "message": message, "packet": found} if args.json else found
-    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    message = f"Omissions template for {len(found['sections'])} unaccounted section(s)."
+    # Reading changes nothing, so the result is not kept as the request's last result.
+    result = {"request_id": run_dir.name, "stage": "omissions-template", "status": "passed", "artifacts": [],
+              "issues": [], "next_actions": [], "message": message, "template": found} if args.json else found
+    print(json.dumps(result, indent=2, ensure_ascii=False))
     if not args.json:
         print(message, file=sys.stderr)
     return 0
@@ -1172,8 +1138,8 @@ def script(args: argparse.Namespace, root: Path) -> int:
 
 COMMANDS = {"prepare": prepare, "status": status, "plan": plan, "script": script, "review": review, "build": build,
             "review-input": review_input, "preview": preview, "media-review": media_review,
-            "resume": resume, "replay": replay, "excerpt": excerpt, "packet": packet, "revise": revise,
-            "baseline": baseline,
+            "resume": resume, "replay": replay, "excerpt": excerpt, "omissions-template": omissions_template,
+            "revise": revise, "baseline": baseline,
             "note": note, "narrate": narrate, "timing": timing, "render": render, "validate": validate}
 
 

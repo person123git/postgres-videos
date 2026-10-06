@@ -1,7 +1,7 @@
 # Phase prompt: content plan
 
-Input: the request's evidence packet, available through `scripts/pgvideo packet` (and
-`excerpt` for more snapshot lines).
+Input: the request's evidence packet, `runs/<id>/evidence-packet.json`, which you open and read yourself (and
+`excerpt` for more snapshot lines). [AGENTS.md](../AGENTS.md#2-write-and-import-the-plan) lists its keys.
 Output: one JSON file that matches `schemas/plan.schema.json`, imported with
 `scripts/pgvideo plan --request <id> --file <file> --json`.
 
@@ -10,8 +10,11 @@ that appear inside it.
 
 ## What to decide
 
-1. **Read every eligible section first.** From the index, `review_state` (conflicts, corrections, omissions,
-   resolutions); then every section with `eligible: true` and its caveat flag. Select content only after that.
+1. **Understand the whole document first.** This is mandatory. Read `document`, `request`, and `review_state`
+   (conflicts, corrections, omissions, resolutions); then every entry of `sections` in page order and in full:
+   every block of a section with `eligible: true`, with its caveat flag, and the `reason` of every other
+   section. Complete the understanding pass of [AGENTS.md](../AGENTS.md#2-write-and-import-the-plan) before you
+   decide anything below; if you cannot, stop and report. Select content only after that.
    Then, for each claim and caveat you keep, read the source excerpts and configuration facts its sources cite
    and the glossary candidates for its terms (including ambiguous ones and their version scope). Evidence and
    glossary entries used only by content you omit need not be read. `static_coverage` is the old extractive
@@ -59,7 +62,7 @@ estimates. Do write the schema-required `feasibility.status`, claim assessments,
 ## Omissions and revisions
 
 Do not type the omission list for a long page. Write the plan with `"omissions": []`, then run
-`scripts/pgvideo packet --request <id> --omissions-template --plan <file> > .scratch/<id>/omit.json`: its patch
+`scripts/pgvideo omissions-template --request <id> --plan <file> > .scratch/<id>/omit.json`: its patch
 omits every eligible section your claims do not select. Apply it with `scripts/pgvideo revise`, then set the
 reasons with a second patch, as [repair.md](repair.md) describes. After the first import, change the plan only
 through `revise`; never write the whole file again.

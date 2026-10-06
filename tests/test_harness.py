@@ -156,131 +156,19 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("never substitutes", result["message"])
 
-    def test_packet_returns_complete_views(self):
-        _result, run_dir = self.prepare()
-        packet = self.load(run_dir, "evidence-packet.json")
-
-        def view(*options) -> dict:
-            status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
-            self.assertEqual((status, result["status"]), (0, "passed"), result)
-            return result["packet"]
-
-        # The index names every section without its blocks and carries what the plan copies.
-        index = view()
-        self.assertEqual([row["id"] for row in index["sections"]], [s["id"] for s in packet["sections"]])
-        self.assertEqual([row["blocks"] for row in index["sections"]], [len(s["blocks"]) for s in packet["sections"]])
-        self.assertEqual((index["digests"], index["request"]), (packet["digests"], packet["request"]))
-        self.assertNotIn("page", index)
-        self.assertNotIn("pages", index)
-
-        # A section is returned unchanged, with the evidence its own units cite and nothing else.
-        read = next(s for s in packet["sections"] if s["id"] == "read-path")
-        section = view("--section", "read-path")
-        self.assertEqual(section["blocks"], read["blocks"])
-        cited = sorted(e["id"] for e in packet["evidence"]["excerpts"]
-                       if any(unit.split(".")[0] == "read-path" for unit in e["cited_by"]))
-        self.assertTrue(cited)
-        self.assertEqual(section["section"]["evidence"], cited)
-
-        # Evidence and glossary entries are fetched by ID or term, exactly as the packet holds them.
-        fetched = view("--evidence", cited[0], "guc:example_size")["evidence"]
-        self.assertEqual(fetched[0], next(e for e in packet["evidence"]["excerpts"] if e["id"] == cited[0]))
-        self.assertEqual(fetched[1]["id"], "guc:example_size")
-        self.assertEqual(view("--settings")["settings"], packet["evidence"]["settings"])
-        entry = packet["glossary"]["entries"][0]
-        listed = [item["entry"] for item in view("--glossary")["glossary"] if "entry" in item]
-        self.assertEqual([e["id"] for e in listed], [e["id"] for e in packet["glossary"]["entries"]])
-        self.assertNotIn("occurrences", listed[0])
-        full = view("--glossary", entry["term"].upper())["glossary"][0]["entry"]
-        self.assertEqual((full["definition"], full["occurrences"]), (entry["definition"], len(entry["occurrences"])))
-
-        # An unknown section, evidence ID, or term fails; nothing is guessed.
-        for options in (("--section", "absent"), ("--evidence", "pg:src/absent.c#L1-L3"), ("--glossary", "absent"),
-                        ("--section", "read-path", "absent"), ("--text",)):
-            status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
-            self.assertEqual((status, result["status"]), (1, "failed"), options)
-
-    def test_packet_serves_several_sections_and_the_document_as_text(self):
-        _result, run_dir = self.prepare()
-        packet = self.load(run_dir, "evidence-packet.json")
-        served = [s for s in packet["sections"] if s["eligible"] and s["blocks"]]
-        self.assertGreater(len(served), 2)
-
-        def view(*options) -> dict:
-            status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
-            self.assertEqual((status, result["status"]), (0, "passed"), result)
-            return result["packet"]
-
-        def text(*options) -> str:
-            args = cli.parser().parse_args(["packet", "--request", run_dir.name, *options, "--text"])
-            stdout = io.StringIO()
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(cli.COMMANDS["packet"](args, self.workspace), 0)
-            return stdout.getvalue()
-
-        # Several sections come back in the order asked, each as a single-section view.
-        names = [served[2]["id"], served[0]["id"]]
-        several = view("--section", *names)["sections"]
-        self.assertEqual([s["section"]["id"] for s in several], names)
-        self.assertEqual(several[0], view("--section", names[0]))
-        # The document is every section with content, and names what the packet leaves out and why.
-        document = view("--document")
-        self.assertEqual([s["section"]["id"] for s in document["sections"]], [s["id"] for s in served])
-        left_out = {s["id"] for s in packet["sections"]} - {s["id"] for s in served}
-        self.assertEqual({s["id"] for s in document["not_served"]}, left_out)
-        # As text, every sentence and row is one line that starts with its unit ID, in page order.
-        page = text("--document")
-        lines = page.splitlines()
-        self.assertLess(max(len(line) for line in lines), 2000)
-        positions = []
-        for section in served:
-            for block in section["blocks"]:
-                for unit in block.get("sentences", []) + block.get("rows", []):
-                    line = next(k for k, found in enumerate(lines) if found.lstrip().startswith(f"- `{unit['id']}` "))
-                    positions.append(line)
-                    self.assertIn(" ".join(str(unit.get("text") or unit["cells"][0]).split()), lines[line])
+    def test_the_evidence_packet_is_read_as_a_file_not_through_a_command(self):
+        result, run_dir = self.prepare()
+        self.assertNotIn("packet", cli.COMMANDS)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            cli.parser().parse_args(["packet", "--request", run_dir.name])
+        self.assertIn(f"runs/{run_dir.name}/evidence-packet.json", result["next_actions"][0]["reason"])
+        # The file is indented and in reading order: the page's sections come before the glossary and the evidence.
+        text = (run_dir / "evidence-packet.json").read_text(encoding="utf-8")
+        self.assertLess(max(len(line) for line in text.splitlines()), 20_000)
+        order = ("document", "request", "speech", "sections", "glossary", "evidence", "review_state", "digests")
+        self.assertEqual(tuple(key for key in json.loads(text) if key in order), order)
+        positions = [text.index(f'\n  "{key}": ') for key in order]
         self.assertEqual(positions, sorted(positions))
-        for excerpt in packet["evidence"]["excerpts"]:
-            self.assertIn(f"`{excerpt['id']}`", page)
-        for name in left_out:
-            self.assertIn(f"- `{name}` ", page)
-        one = text("--section", names[0])
-        self.assertIn(f"`{names[0]}`", one)
-        self.assertNotIn(f"`{names[1]}` · level", one)
-
-    def test_large_packet_views_return_all_items_in_one_response(self):
-        _result, run_dir = self.prepare()
-        packet = self.load(run_dir, "evidence-packet.json")
-        # Many small entries force pagination under the old cap; one oversized entry alone did not.
-        packet["sections"] *= 100
-        section = next(s for s in packet["sections"] if s["id"] == "read-path")
-        section["blocks"] *= 100
-        packet["evidence"]["settings"] *= 100
-        packet["glossary"]["entries"] *= 100
-        evidence = packet["evidence"]["excerpts"]
-        evidence[:] = [{**evidence[0], "id": f"example-{i}"} for i in range(100)]
-        with patch("pgvideo.evidence.packet", return_value=packet):
-            for options, key, expected in (
-                ((), "sections", [s["id"] for s in packet["sections"]]),
-                (("--section", "read-path"), "blocks", section["blocks"]),
-                (("--evidence", *(e["id"] for e in evidence)), "evidence", evidence),
-                (("--glossary",), "glossary", packet["glossary"]["entries"]),
-                (("--settings",), "settings", packet["evidence"]["settings"]),
-            ):
-                with self.subTest(view=key):
-                    status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
-                    self.assertEqual((status, result["status"]), (0, "passed"), result)
-                    found = result["packet"]
-                    self.assertGreater(len(json.dumps(found).encode()), 24_000)
-                    self.assertNotIn("page", found)
-                    self.assertNotIn("pages", found)
-                    if key == "sections":
-                        self.assertEqual([s["id"] for s in found[key]], expected)
-                    elif key == "glossary":
-                        entries = [item["entry"] for item in found[key] if "entry" in item]
-                        self.assertEqual([e["id"] for e in entries], [e["id"] for e in expected])
-                    else:
-                        self.assertEqual(found[key], expected)
 
     def test_long_citations_and_excerpt_ranges_are_complete(self):
         snapshot = postgres_snapshot()
@@ -531,10 +419,9 @@ class HarnessTests(unittest.TestCase):
                          renamed)
 
         # The template omits what the plan leaves unaccounted; the question cannot be omitted.
-        status, result, _stderr = self.command("packet", "--request", rid, "--omissions-template", "--plan",
-                                               str(source))
-        self.assertEqual(status, 0, result)
-        template = result["packet"]
+        status, result, _stderr = self.command("omissions-template", "--request", rid, "--plan", str(source))
+        self.assertEqual((status, result["stage"], result["status"]), (0, "omissions-template", "passed"), result)
+        template = result["template"]
         packet = self.load(run_dir, "evidence-packet.json")
         eligible = {s["id"] for s in packet["sections"] if s["eligible"] and s["blocks"]}
         offered = {value["section"] for value in template["patch"][0]["values"]}
@@ -542,9 +429,16 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("question", template["essential"])
         self.assertIn("known-limitations", template["caveats"])
         self.assertTrue(all(value["reason"] == "" for value in template["patch"][0]["values"]))
-        status, result, _stderr = self.command("packet", "--request", rid, "--omissions-template", "--plan",
+        status, result, _stderr = self.command("omissions-template", "--request", rid, "--plan",
                                                str(write(folder / "good.json", plan)))
-        self.assertEqual((result["packet"]["patch"], result["packet"]["essential"]), ([], []))
+        self.assertEqual((result["template"]["patch"], result["template"]["essential"]), ([], []))
+        # Without a plan, every eligible section is offered; a missing plan file fails and nothing is guessed.
+        status, result, _stderr = self.command("omissions-template", "--request", rid)
+        self.assertEqual({value["section"] for value in result["template"]["patch"][0]["values"]}
+                         | set(result["template"]["essential"]), eligible)
+        status, result, _stderr = self.command("omissions-template", "--request", rid, "--plan",
+                                               str(folder / "absent.json"))
+        self.assertEqual((status, result["status"]), (1, "failed"))
 
         def revise(operations, out: str, origin: Path = source) -> tuple[int, dict]:
             patch_file = write(folder / f"patch-{out}", operations)
@@ -855,10 +749,22 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(units)
         uncited = [unit for section, block, unit, _text in units if not {section, block, unit} & cited]
         self.assertTrue(uncited)
+        page = files["document"].splitlines()
+        self.assertLess(max(len(line) for line in page), 2000)
+        positions = []
         for _section, _block, unit, text in units:
-            line = next(line for line in files["document"].splitlines() if line.startswith(f"- `{unit}` "))
-            self.assertIn(text, line)
-            self.assertEqual("[no scene cites this]" in line, unit in uncited, unit)
+            position = next(k for k, line in enumerate(page) if line.startswith(f"- `{unit}` "))
+            positions.append(position)
+            self.assertIn(text, page[position])
+            self.assertEqual("[no scene cites this]" in page[position], unit in uncited, unit)
+        self.assertEqual(positions, sorted(positions))
+        # It names the evidence each section's units cite, and the sections the packet holds no content for.
+        for excerpt in packet["evidence"]["excerpts"]:
+            self.assertIn(f"`{excerpt['id']}`", files["document"])
+        left_out = [s["id"] for s in packet["sections"] if not (s["eligible"] and s["blocks"])]
+        self.assertTrue(left_out)
+        for name in left_out:
+            self.assertIn(f"- `{name}` ", files["document"])
         for unit in uncited:
             self.assertIn(f"- `{unit}` ", files["coverage"])
         self.assertEqual(index["counts"]["units"] - index["counts"]["units_cited"],

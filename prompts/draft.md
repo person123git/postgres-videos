@@ -1,7 +1,7 @@
 # Phase prompt: narration and storyboard
 
 Input: the accepted `runs/<request-id>/plan.json`, the sections, evidence, and glossary entries it names
-(fetched with `scripts/pgvideo packet`, not by opening `evidence-packet.json`), and current `status` digests.
+(read in `runs/<request-id>/evidence-packet.json`, which you open yourself), and current `status` digests.
 Read `draft-input.json` if it already exists; the `script` command generates it during import. Do not create
 a dummy storyboard merely to obtain this file. `status` gives the current `plan_digest`.
 Output: one JSON file that matches `schemas/storyboard.schema.json`, imported with

@@ -31,7 +31,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import packet as packet_views
 from .crosscheck import _recorded
 from .orchestration import DURATION_TOLERANCE, request
 from .review import OVERALL, PENDING, carry_over, targets
@@ -59,6 +58,97 @@ def _one_line(value) -> str:
 
 def _cell(value) -> str:
     return _one_line(value).replace("|", "\\|")
+
+
+def _tidy(lines: list[str]) -> str:
+    """Join lines into text, keeping one blank line between parts and code blocks as they are."""
+    kept, fenced = [], False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        if line or fenced or (kept and kept[-1]):
+            kept.append(line)
+    return "\n".join(kept).rstrip() + "\n"
+
+
+def _in_section(unit: str, section: str) -> bool:
+    return unit == section or unit.startswith(section + ".")
+
+
+def _flags(unit: dict, marks: dict[str, str]) -> str:
+    """What a reader must know about one unit beyond its text."""
+    notes = [marks[unit["id"]]] if unit["id"] in marks else []
+    lexical = unit.get("lexical") or {}
+    if lexical.get("status") == "unconfirmed":
+        notes.append("lexical unconfirmed" + (": " + ", ".join(lexical["not_found"]) + " not found"
+                                              if lexical.get("not_found") else ""))
+    if unit.get("corrections"):
+        notes.append("correction " + ", ".join(unit["corrections"]))
+    if unit.get("omitted_by_review"):
+        notes.append("omitted by a recorded resolution")
+    return "".join(f" [{note}]" for note in notes)
+
+
+def _page(packet: dict, marks: dict[str, str]) -> str:
+    """Render the packet's sections as text to read in page order; every sentence, row, and block keeps its unit ID.
+
+    Nothing is selected or summarized: text is as the packet holds it. `marks` adds a note to a unit, such as
+    that no scene cites it. The sections the packet holds no content for are listed at the end with the reason.
+    """
+    document = packet["document"]
+    lines = [f"# {document.get('title') or document['path']}", "",
+             f"PostgreSQL {document['version']} · {document['path']} at wiki commit "
+             f"{document['wiki_commit'][:12]}" + (" · the page is marked unverified" if document.get("unverified")
+                                                    else ""),
+             "", packet["notice"], ""]
+    held = [section for section in packet["sections"] if section["eligible"] and section["blocks"]]
+    for section in held:
+        name = section["id"]
+        about = [f"`{name}`", f"level {section['level']}"]
+        about += [f"under `{section['parent']}`"] if section.get("parent") else []
+        about += [f"role {section['role']}"] if section.get("role") else []
+        about += ["caveat section"] if section.get("caveat") else []
+        lines += [f"## {section['heading']}", "", " · ".join(about), ""]
+        for block in section["blocks"]:
+            if block["type"] == "paragraph":
+                lines += [f"- `{unit['id']}` {_one_line(unit['text'])}{_flags(unit, marks)}"
+                          for unit in block["sentences"]]
+            elif block["type"] == "table":
+                lines += [f"- `{block['id']}` table: " + " | ".join(_one_line(cell) for cell in block["header"])]
+                lines += [f"  - `{row['id']}` " + " | ".join(_one_line(cell) for cell in row["cells"])
+                          + _flags(row, marks) for row in block["rows"]]
+            elif block["type"] == "code":
+                fence = "````" if "```" in block["content"] else "```"
+                label = block.get("language") or block.get("kind") or ""
+                lines += [f"- `{block['id']}` code" + (f" ({label})" if label else "") + _flags(block, marks), "",
+                          fence + (block.get("language") or ""), block["content"].rstrip("\n"), fence, ""]
+            elif block["type"] == "image":
+                shown = ", ".join(f"{image.get('path')}" + (f" ({image['alt']})" if image.get("alt") else "")
+                                  for image in block.get("images", []))
+                lines.append(f"- `{block['id']}` image: {shown}{_flags(block, marks)}")
+        cited: dict[str, list[str]] = {}
+        for excerpt in packet["evidence"]["excerpts"]:
+            for unit in excerpt["cited_by"]:
+                if _in_section(unit, name) and unit not in cited.setdefault(excerpt["id"], []):
+                    cited[excerpt["id"]].append(unit)
+        cited = {identifier: units for identifier, units in cited.items() if units}
+        if cited:
+            lines += ["", "Evidence its units cite (`evidence.excerpts` in `evidence-packet.json`, by `id`):", ""]
+            lines += [f"- `{identifier}` ← {', '.join(units)}" for identifier, units in cited.items()]
+        glossary = sorted(entry["id"] for entry in packet["glossary"]["entries"]
+                          if any(_in_section(unit, name) for unit in entry["occurrences"]))
+        if glossary:
+            lines += ["", "Glossary entries its units use: " + ", ".join(f"`{g}`" for g in glossary)]
+        lines.append("")
+    names = {section["id"] for section in held}
+    left_out = [section for section in packet["sections"] if section["id"] not in names]
+    if left_out:
+        lines += ["## Sections the packet holds no content for", ""]
+        lines += [f"- `{s['id']}` {s['heading']}: " + (s["reason"] or ("no content of its own" if s["eligible"]
+                                                                      else f"role {s['role']}"))
+                  for s in left_out]
+        lines.append("")
+    return _tidy(lines)
 
 
 def _scene_claims(scene: dict) -> set[str]:
@@ -237,7 +327,7 @@ def _video(run_dir: Path, digests: dict, storyboard: dict, plan: dict, found: di
             if item["tts_source"] == "manual":
                 lines.append(f"- {mark('tts:' + item['id'])} spoken as: {_one_line(item['tts'])}")
         lines.append("")
-    return packet_views.tidy(lines)
+    return _tidy(lines)
 
 
 def _coverage(rows: list[dict], storyboard: dict) -> str:
@@ -340,7 +430,7 @@ def write(root: Path, run_dir: Path) -> dict:
     marks = {unit["id"]: UNCITED for row in rows for unit in row["uncited"]}
     bodies = {
         "video": _video(run_dir, digests, storyboard, plan, found, set((carried or {}).get("findings", {}))),
-        "document": packet_views.text(packet, marks=marks),
+        "document": _page(packet, marks),
         "coverage": _coverage(rows, storyboard),
         "checks": _checks(storyboard, plan),
         "plan": json.dumps(plan_view(plan), indent=2, ensure_ascii=False) + "\n",

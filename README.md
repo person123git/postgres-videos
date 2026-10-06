@@ -89,8 +89,7 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo resume --request <id>` | Repeats the glossary cross-check with the request's `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review. | no |
 | `scripts/pgvideo replay --request <id> --from <other-id>` | Revalidates another request's accepted content for this request when the evidence, prompts, and review policy match. No new inference. | no |
 | `scripts/pgvideo excerpt --request <id> --path <file> --lines <a>-<b>` | Prints lines of a PostgreSQL file from the request's snapshot with their evidence ID. | no |
-| `scripts/pgvideo packet --request <id> [--section <id>… \| --document \| --evidence <id>… \| --glossary [<term>…] \| --settings] [--text]` | Prints a complete view of the evidence packet: its index, sections, the whole document, evidence by ID, glossary candidates, or configuration facts. `--text` prints sections or the document as text to read in page order. | no |
-| `scripts/pgvideo packet --request <id> --omissions-template [--plan <file>]` | Prints a `revise` patch that omits, with empty reasons to fill in, every eligible section the plan leaves unaccounted. | no |
+| `scripts/pgvideo omissions-template --request <id> [--plan <file>]` | Prints a `revise` patch that omits, with empty reasons to fill in, every eligible section the plan leaves unaccounted. | no |
 | `scripts/pgvideo revise --from <file> --patch <patch> --out <new.json>` | Applies a small patch to a plan, storyboard, or review input file and writes a new revision. The source file is unchanged. | no |
 | `scripts/pgvideo baseline --request <id>` | Drafts the old extractive script for comparison. It is never narrated or delivered. | no |
 | `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records supplementary observations after validation; does not pass final media review. | no |
@@ -107,13 +106,13 @@ command, and a failed check stops the command. `scripts/pgvideo <command> --help
 lists a command's options.
 
 The harness-facing commands (`prepare`, `status`, `plan`, `script`, `review`,
-`build`, `review-input`, `preview`, `media-review`, `resume`, `replay`, `excerpt`, `packet`, `revise`, `baseline`, `note`) take `--json`. They
+`build`, `review-input`, `preview`, `media-review`, `resume`, `replay`, `excerpt`, `omissions-template`, `revise`, `baseline`, `note`) take `--json`. They
 then print one structured result on standard output, with `request_id`,
 `stage`, `status`, `artifacts`, `issues`, `next_actions`, and a `message`
 ([schemas/stage-result.schema.json](schemas/stage-result.schema.json)), and keep
 it as `runs/<id>/last-result.json`. Progress lines go to standard error. `excerpt`
-and `packet` only read, and `revise` writes only the harness's own input file, so
-their results are not kept.
+and `omissions-template` only read, and `revise` writes only the harness's own input
+file, so their results are not kept.
 
 ### `prepare` options
 
@@ -266,22 +265,30 @@ audio cache. What stops a request and what happens next:
 
 ### Read the evidence packet
 
-`packet` returns the complete requested view of `evidence-packet.json`, with no
-pagination or response-size cap:
+No command serves the evidence packet. The harness opens
+`runs/<id>/evidence-packet.json` and reads it. The file is indented JSON whose
+keys are in reading order: `document`, `request`, and `speech`; `sections`, in
+page order; `glossary`; `evidence`; `review_state`; and `digests`.
+
+The harness plans in three passes. It must first understand the whole document:
+it reads `document`, `request`, `review_state`, and every section in full, and
+does not select content until it can state the page's question and answer, what
+each section adds, which facts repeat, and which qualifications and corrections
+apply. If it cannot, it stops and reports. It then selects content, and reads the
+evidence and glossary entries for the content it keeps. `AGENTS.md` requires
+this as execution rule 5. After an interruption, `status` identifies the next
+workflow stage.
+
+To return to one entry, the harness selects it by ID:
 
 ```sh
-scripts/pgvideo packet --request <id> --json                        # index: request, digests, review state, section list
-scripts/pgvideo packet --request <id> --section short-answer --json # one section, with the evidence and glossary IDs it uses
-scripts/pgvideo packet --request <id> --document --text             # the whole page as text, one unit per line with its ID
-scripts/pgvideo packet --request <id> --evidence "pg:src/backend/utils/misc/guc_tables.c#L3769-L3784" guc:track_activity_query_size --json
-scripts/pgvideo packet --request <id> --glossary --json             # every glossary candidate
-scripts/pgvideo packet --request <id> --glossary GIN --json         # one entry in full
-scripts/pgvideo packet --request <id> --settings --json             # the parsed configuration facts
+P="runs/<id>/evidence-packet.json"
+jq '{document, request, speech, review_state, digests}' "$P"         # what the plan copies, and the review state
+jq --arg s "short-answer" '.sections[] | select(.id == $s)' "$P"      # one section
+jq --arg s "short-answer" '.evidence.excerpts[] | select(any(.cited_by[]; . == $s or startswith($s + ".")))' "$P"
+jq --arg e "guc:track_activity_query_size" '.evidence | (.excerpts[], .settings[]) | select(.id == $e)' "$P"
+jq --arg t "GIN" '.glossary | (.entries[], .ambiguous[]) | select(.term == $t)' "$P"
 ```
-
-The harness plans in two passes: it reads the index and every eligible section,
-then fetches evidence and glossary entries for the content it keeps. After an
-interruption, `status` identifies the next workflow stage.
 
 ### Repair a plan or storyboard with a patch
 
@@ -317,14 +324,14 @@ A path is keys joined by dots. After a list, a selector in brackets picks entrie
 has that value, and `[=short-answer.1.s1]` the entries equal to a value.
 
 For a long page, the harness does not type the omission list either.
-`packet --omissions-template` prints a patch that omits every eligible section a
+`omissions-template` prints a patch that omits every eligible section a
 plan neither selects nor omits, each with an empty reason; the harness applies it
 and then sets the reasons. The plan schema rejects an empty reason. The question
 and the page's own summary cannot be omitted, so the template lists them under
 `essential`:
 
 ```sh
-scripts/pgvideo packet --request <id> --omissions-template --plan .scratch/<id>/plan.v1.json > .scratch/<id>/omit.json
+scripts/pgvideo omissions-template --request <id> --plan .scratch/<id>/plan.v1.json > .scratch/<id>/omit.json
 scripts/pgvideo revise --from .scratch/<id>/plan.v1.json --patch .scratch/<id>/omit.json --out .scratch/<id>/plan.v2.json --json
 ```
 
@@ -1216,7 +1223,8 @@ directories used to simulate escaping paths.
   from the extractive baseline, to cover `prepare` stopping at the evidence
   packet, eligibility and the kept static map, stable evidence digests, the
   refused extractive fallback, request constraints, snapshot-only excerpts,
-  complete packet views and source ranges without size caps,
+  the evidence packet read as a file and not through a command, source ranges
+  without size caps,
   every plan check, a repair read from a compact result and patched into a new
   revision with `revise` and the omissions template, every storyboard check,
   derived fields and stale digests,

@@ -497,7 +497,8 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
                      f"Stop and report the unresolved issues{report} to the user; a person must decide. A plan a "
                      "person revises is imported with --human-revision."}]
         reason = ("Write the content plan with prompts/plan.md and schemas/plan.schema.json from "
-                  f"the evidence packet, read in pages with `{tool} packet --request {rid}`." if plan is None else
+                  f"the evidence packet, runs/{rid}/evidence-packet.json: open that file and read it in full, in "
+                  "order, and understand the whole document before you select content." if plan is None else
                   f"Revise the plan from runs/{rid}/plan-report.md with prompts/repair.md: patch it into a new revision "
                   f"with `{tool} revise`, never retype it. Or report an infeasible plan to the user.")
         return [{"action": "author", "phase": "plan", "command": f"{tool} plan --request {rid} --file <plan.json>",

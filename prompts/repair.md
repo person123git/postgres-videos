@@ -69,7 +69,7 @@ Examples: `claims[id=size-sets-slot].sources`, `claims[*].assessment.glossary`,
   the schema rejects an `id`, change that `id` and every place that names it (`outline[*].claims`,
   `main_answer.claims`, `required_caveats[*].claim`, `depends_on`). Do not change `sources`.
 - Unaccounted sections. First repair the claims' `sources`, so selected sections count. Then run
-  `scripts/pgvideo packet --request <id> --omissions-template --plan <your plan> > .scratch/<id>/omit.json`.
+  `scripts/pgvideo omissions-template --request <id> --plan <your plan> > .scratch/<id>/omit.json`.
   Its patch omits every eligible section the plan does not select, each with an empty reason. Apply it with
   `revise`. Then set the reasons with a second patch: the sections that need their own reason first
   (`omissions[section=<id>].reason`), then `omissions[reason=].reason` for those that share one. An empty reason

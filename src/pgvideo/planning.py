@@ -206,7 +206,8 @@ class _Check:
                 if not unit:
                     meant = self._meant(source)
                     self.issue("blocking", "unknown_source", f"{source} is not a unit of the document.", **where,
-                               action=(f"Cite {meant}. " if meant else "Copy the unit ID from `packet --section`. ")
+                               action=(f"Cite {meant}. " if meant else
+                                       "Copy the unit ID from the section's `blocks` in evidence-packet.json. ")
                                + "Only a claim's own `id` is hyphenated; `sources` keep the document's unit IDs, "
                                  "dots included.")
                     continue
@@ -350,8 +351,9 @@ class _Check:
                 continue
             self.issue("blocking", "section_unaccounted", f"Eligible section {section['id']} ({section['heading']}) "
                        "is neither selected nor omitted with a reason.", section=section["id"],
-                       action="Select claims from it, or add {section, reason} to omissions. `packet --omissions-template "
-                              "--plan <file>` writes the patch that omits every unaccounted section.")
+                       action="Select claims from it, or add {section, reason} to omissions. `omissions-template "
+                              "--request <id> --plan <file>` writes the patch that omits every unaccounted "
+                              "section.")
         return omissions
 
     def _is_essential(self, section: dict) -> bool:
