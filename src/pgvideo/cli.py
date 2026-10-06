@@ -34,7 +34,8 @@ from .sources import DEFAULT_REF, FALLBACK_REF, REPOSITORY, SourceError, resolve
 # Exit status for a request that needs a documented resolution before it can continue.
 NEEDS_REVIEW = 3
 # Narration and encoding settings that build, resume, and script use; a reuse lookup plans with them.
-# At 128 kb/s the AAC encoder's noise substitution raised the decoded true peak above validation's limit.
+# At 192 kb/s libopus adds about 0.1 dB to the narration master's true peak; at 64 kb/s it adds about 0.8 dB,
+# nearly all of the headroom under validation's limit.
 LUFS, TRUE_PEAK, CRF, AUDIO_BITRATE = -16.0, -1.5, 20, 192
 NO_REUSE = ("build the narration and MP4 even when a validated video with the same inputs exists; "
             "it is registered for reuse afterwards")
@@ -195,7 +196,7 @@ def parser() -> argparse.ArgumentParser:
     request_command("timing", "rebuild scene timing and captions from passed narration", json_output=False)
     render = request_command("render", "render, validate, and deliver the MP4 from passed timing", json_output=False)
     render.add_argument("--crf", type=int, default=CRF, help="H.264 constant rate factor (default: 20)")
-    render.add_argument("--audio-bitrate", type=int, default=AUDIO_BITRATE, help="AAC bitrate in kb/s (default: 192)")
+    render.add_argument("--audio-bitrate", type=int, default=AUDIO_BITRATE, help="Opus bitrate in kb/s (default: 192)")
     request_command("validate", "validate and deliver an existing rendered request", json_output=False)
     return command
 

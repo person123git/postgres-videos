@@ -236,7 +236,7 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(self.index(key), [first.name])
         calls, renders = len(self.kokoro.calls), self.slides.call_count
         self.assertGreater(calls, 0)
-        # At 128 kb/s the AAC encoder's noise substitution raised the decoded true peak above validation's limit.
+        # 192 kb/s leaves libopus the most headroom under validation's true-peak limit.
         self.assertEqual(json.loads((first / "render.json").read_text(encoding="utf-8"))["audio_bitrate_kbps"], 192)
         # A harness video is delivered with its content report, plan, and orchestration record.
         delivery = self.workspace / "output" / first.name

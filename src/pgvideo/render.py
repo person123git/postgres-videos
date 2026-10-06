@@ -161,8 +161,9 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
 
 def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: int = 192) -> dict:
     """Build a draft MP4; Step 11 validates it before delivery."""
-    if not 0 <= crf <= 51 or not 32 <= audio_bitrate <= 512:
-        raise ValueError("CRF must be 0–51 and audio bitrate must be 32–512 kb/s")
+    # libopus accepts at most 256 kb/s for one channel.
+    if not 0 <= crf <= 51 or not 32 <= audio_bitrate <= 256:
+        raise ValueError("CRF must be 0–51 and audio bitrate must be 32–256 kb/s")
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     try:
@@ -204,7 +205,7 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: in
               "-safe", "0", "-f", "concat", "-i", str(concat), "-i", str(audio),
               "-map", "0:v:0", "-map", "1:a:0", "-vf", "fps=30", "-frames:v", str(timeline["total_frames"]),
               "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-pix_fmt", "yuv420p",
-              "-r", "30", "-c:a", "aac", "-b:a", f"{audio_bitrate}k", "-ar", "48000", "-ac", "1",
+              "-r", "30", "-c:a", "libopus", "-b:a", f"{audio_bitrate}k", "-ar", "48000", "-ac", "1",
               "-movflags", "+faststart", str(draft)])
         probe = json.loads(_run([str(root / ".runtime/bin/ffprobe"), "-v", "error", "-count_frames",
                                  "-show_streams", "-show_format", "-of", "json", str(draft)]).stdout)
@@ -214,7 +215,7 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: in
             video["r_frame_rate"], int(video.get("nb_read_frames", -1)), sound["codec_name"],
             sound["sample_rate"], sound["channels"]) != (
                 "h264", "yuv420p", width, height, "30/1", timeline["total_frames"],
-                "aac", "48000", 1):
+                "opus", "48000", 1):
             raise ValueError("Encoded streams do not match the requested format or frame count")
         record = {"status": "passed", "created_at": datetime.now(timezone.utc).isoformat(),
                   "draft": str(draft.relative_to(run_dir)), "sha256": _sha(draft),

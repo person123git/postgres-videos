@@ -153,7 +153,7 @@ The other commands' options:
 | `narrate` | `--true-peak` | `-1.5` | Maximum true peak, from -9 to 0 dBTP. |
 | `narrate` | `--refresh-unit` | none | Synthesize a unit or sentence again even though it is cached, such as `s01-title.n1.u1`. Repeat the option for several. |
 | `render` | `--crf` | `20` | H.264 constant rate factor, from 0 to 51; lower is higher quality. |
-| `render` | `--audio-bitrate` | `192` | AAC bitrate, from 32 to 512 kb/s. |
+| `render` | `--audio-bitrate` | `192` | Opus bitrate, from 32 to 256 kb/s. |
 
 ### Exit status
 
@@ -520,7 +520,7 @@ deny: writing `/tmp`, reading `/etc/passwd`, running `/usr/bin/true`, and, when
 offline, connecting to a TEST-NET address.
 
 `doctor --sample` runs offline. It synthesizes a Kokoro WAV and renders a
-1920 × 1080 slide with headless Chromium, then encodes an H.264/AAC MP4 with
+1920 × 1080 slide with headless Chromium, then encodes an H.264/Opus MP4 with
 `+faststart` and verifies it with ffprobe and a full decode. It confirms
 through the DevTools protocol that the slide text used only the fonts in
 `assets/fonts/`, and that every native library mapped by the sample came from
@@ -1061,7 +1061,7 @@ After timing, Playwright renders each storyboard scene to a PNG using the
 bundled fonts and a reusable slide template. It rejects overflow, missing
 images, and fonts outside the bundle. The renderer holds each PNG for the
 scene's measured frame count, then encodes `render/draft.mp4` with H.264 video
-at 30 fps and AAC mono audio at 48 kHz. `render.json` records the input and
+at 30 fps and Opus mono audio at 48 kHz. `render.json` records the input and
 artifact hashes, and `references.md` links to the resolved document and
 commit-specific citations. Validation fully decodes the draft, checks its
 streams, timing, caption coverage, spoken units, silence, and loudness, then
@@ -1070,9 +1070,11 @@ prepares the MP4 and accompanying files under the run's `delivery/` directory. F
 requests retain automatic delivery. The run's
 `quality-report.json` records the measurements and delivery hashes.
 
-The audio is encoded at 192 kb/s by default. At 128 kb/s the AAC encoder can
-replace loud "s" sounds with noise, and the decoded noise can exceed the
-true-peak limit that validation checks.
+The audio is encoded with libopus at 192 kb/s by default. A lower bitrate adds
+more to the narration master's true peak (about 0.1 dB at 192 kb/s; 0.5 to
+0.8 dB at 128 kb/s and below), toward the true-peak limit that validation
+checks. Opus in MP4 plays in Chrome, Edge, and Firefox. Apple platforms decode
+it from iOS 17; earlier versions play the video without sound.
 
 When a stage runs again, the manifest drops the records of every later stage,
 including an earlier validation, so it never describes media that was built

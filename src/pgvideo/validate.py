@@ -137,7 +137,7 @@ def validate_video(root: Path, run_dir: Path) -> dict:
                  video["avg_frame_rate"], int(video.get("nb_read_frames", -1))) !=
                 ("h264", "yuv420p", width, height, "30/1", timeline["total_frames"]) or
                 (sound["codec_name"], sound["sample_rate"], sound["channels"]) !=
-                ("aac", "48000", 1)):
+                ("opus", "48000", 1)):
             raise ValueError("MP4 container, codecs, dimensions, rate, or frame count differ from the request")
         video_end = float(video["start_time"]) + float(video["duration"])
         audio_end = float(sound["start_time"]) + float(sound["duration"])
@@ -147,12 +147,12 @@ def validate_video(root: Path, run_dir: Path) -> dict:
                 abs(audio_end - timeline["audio_duration_seconds"]) > 0.100 or
                 abs(duration - max(video_end, audio_end)) > 0.050):
             raise ValueError("Audio, video, and timeline end times differ beyond 100 ms")
-        report["checks"]["media"] = {"container": "mp4", "video_codec": "h264", "audio_codec": "aac",
+        report["checks"]["media"] = {"container": "mp4", "video_codec": "h264", "audio_codec": "opus",
                                       "width": width, "height": height, "fps": 30,
                                       "frames": timeline["total_frames"], "duration_seconds": duration,
                                       "video_end_seconds": video_end, "audio_end_seconds": audio_end,
                                       "end_difference_seconds": abs(video_end - audio_end)}
-        # Decode both streams, including the last frame and the last AAC packet.
+        # Decode both streams, including the last frame and the last Opus packet.
         _run([str(ffmpeg), "-v", "error", "-xerror", "-nostdin", "-i", str(draft),
               "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"])
         report["checks"]["complete_decode"] = "passed"

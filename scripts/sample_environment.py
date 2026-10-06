@@ -120,7 +120,7 @@ def encode(audio: Path, image: Path) -> dict:
                     "-map", "0:v", "-map", "1:a", "-shortest",
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30",
                     "-af", "loudnorm=I=-16:TP=-1.5,aresample=48000",
-                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "1",
+                    "-c:a", "libopus", "-b:a", "192k", "-ar", "48000", "-ac", "1",
                     "-movflags", "+faststart", str(video)], check=True)
     probe = json.loads(subprocess.run([str(FFPROBE), "-v", "error", "-show_streams", "-show_format", "-of", "json",
                                        str(video)], check=True, capture_output=True, text=True).stdout)
@@ -128,7 +128,7 @@ def encode(audio: Path, image: Path) -> dict:
     found = (streams["video"]["codec_name"], streams["video"]["pix_fmt"], streams["video"]["width"],
              streams["video"]["height"], streams["video"]["r_frame_rate"], streams["audio"]["codec_name"],
              streams["audio"]["sample_rate"], streams["audio"]["channels"])
-    if found != ("h264", "yuv420p", 1920, 1080, "30/1", "aac", "48000", 1):
+    if found != ("h264", "yuv420p", 1920, 1080, "30/1", "opus", "48000", 1):
         raise RuntimeError(f"sample MP4 has unexpected streams: {found}")
     boxes = mp4_boxes(video)
     if "moov" not in boxes or "mdat" not in boxes or boxes.index("moov") > boxes.index("mdat"):
@@ -138,7 +138,7 @@ def encode(audio: Path, image: Path) -> dict:
     if decoded.stderr.strip():
         raise RuntimeError(f"sample MP4 failed to decode cleanly: {decoded.stderr.strip()}")
     return {"file": str(video.relative_to(ROOT)), "video": "h264 yuv420p 1920x1080 30 fps",
-            "audio": "aac 48 kHz mono", "duration": float(probe["format"]["duration"])}
+            "audio": "opus 48 kHz mono", "duration": float(probe["format"]["duration"])}
 
 
 def loaded_images() -> dict:

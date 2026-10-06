@@ -504,13 +504,13 @@ to fill time. If the available content cannot reach the target, report infeasibi
 
 ### Audio encoding
 
-`build` encodes the audio at 192 kb/s. No separate render is needed after it.
+`build` encodes the audio with Opus (libopus) at 192 kb/s. No separate render is needed after it.
 
 If a result reports `Encoded audio loudness is outside delivery limits`, stop and report the issue, its values,
 the request ID, and `runs/<id>/quality-report.json`. **Never** repair a loudness issue by changing
 `narrate --true-peak`, `narrate --lufs`, or `render --crf`, or with an audio bitrate below 192. Below 192 kb/s
-the AAC encoder can replace loud "s" sounds with noise that exceeds the true-peak limit, and more peak headroom
-does not remove that noise.
+the Opus encoder adds more to the narration master's true peak (about 0.1 dB at 192 kb/s; 0.5 to 0.8 dB at
+128 kb/s and below), which uses up the margin under the true-peak limit.
 
 After `build` passes automated validation, the package is prepared under `runs/<id>/delivery/`; final delivery
 is still gated. Read [prompts/media-review.md](prompts/media-review.md) and
