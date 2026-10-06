@@ -54,7 +54,8 @@ from .document import (CAVEAT_HEADING, DEFAULT_DETAIL, SUPPORTING_HEADING, TARGE
 from .evidence import PACKET, Resolver
 from .markdown import MarkdownError, _FrontMatterLoader
 from .orchestration import (DURATION_TOLERANCE, MAX_DURATION_REWRITES, MAX_REPAIR_ROUNDS, accepted_request_ids,
-                            count_repair, is_harness, producer, record_event, repairs, save_authored)
+                            count_repair, is_harness, load_record, producer, record_event, remember_duration_miss,
+                            repairs, save_authored)
 from .reuse import script_sha256
 from .speech import Pronunciation, PronunciationError, unspeakable
 from .sources import write_atomic
@@ -168,6 +169,8 @@ def create_script(root: Path, run_dir: Path, *, storyboard: Path | None = None, 
     """
     harness = is_harness(run_dir)
     repair = _repair_kind(run_dir, revision=revision, duration_rewrite=duration_rewrite) if harness else None
+    if harness:
+        remember_duration_miss(root, run_dir, json.loads((run_dir / "manifest.json").read_text(encoding="utf-8")))
     try:
         record = _create(root, run_dir, storyboard=storyboard, command=command, repair=repair, revision=revision)
     except (ValueError, OSError) as error:
@@ -183,7 +186,8 @@ def _repair_kind(run_dir: Path, *, revision: str | None, duration_rewrite: bool)
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     used = repairs(run_dir)
     if duration_rewrite:
-        check = (manifest.get("narration") or {}).get("duration_check") or {}
+        check = ((manifest.get("narration") or {}).get("duration_check") or
+                 load_record(run_dir).get("pending_duration_check") or {})
         if check.get("status") != "needs_review":
             raise ValueError("--duration-rewrite is for a request whose measured narration missed its target; this "
                              "request has no such result.")
@@ -192,9 +196,10 @@ def _repair_kind(run_dir: Path, *, revision: str | None, duration_rewrite: bool)
                              f"length to the user; they may accept it with scripts/pgvideo build --request "
                              f"{run_dir.name} --accept-duration.")
         return "duration"
-    if (manifest.get("content_review") or {}).get("status") == "needs_review":
+    if ((manifest.get("content_review") or {}).get("status") == "needs_review" or
+            (manifest.get("media_review") or {}).get("status") == "needs_review"):
         if used.get("storyboard", 0) >= MAX_REPAIR_ROUNDS and revision != "human":
-            raise ValueError(f"The content review still has material issues after {MAX_REPAIR_ROUNDS} repair rounds. "
+            raise ValueError(f"The review still has material issues after {MAX_REPAIR_ROUNDS} repair rounds. "
                              f"Report runs/{run_dir.name}/content-report.md to the user; a revision a person makes "
                              "is imported with --human-revision.")
         return "storyboard"
@@ -1357,7 +1362,9 @@ class _Storyboard:
                        action="Shorten optional detail without dropping required caveats, or revise the plan.")
         elif self.c.harness and low is not None and minutes < low:
             self.issue("note", "short_script", f"The script runs about {minutes} minutes, under the {low}-minute "
-                                               "lower bound of the target.")
+                                               "lower bound of the target.",
+                       action="Expand using unused allowed content and revise the plan if needed; report "
+                              "infeasibility if the allowed content cannot reach the target.")
         elif high is not None and minutes > high:
             planned = self.c.document["coverage"].get("planned_minutes")
             # A long document was already condensed by the coverage map, so its length is reported, not flagged.
@@ -2090,13 +2097,15 @@ class _Storyboard:
     def _planned(self, scenes: list[dict]) -> None:
         """Every planned claim is narrated; the main answer and the required caveats cannot be dropped."""
         narrated = {c for scene in scenes for n in scene["narration"] for c in n.get("claims", [])}
-        narrated |= {c for scene in scenes for edge in (scene["screen"].get("diagram") or {}).get("edges", [])
-                     for c in edge.get("claims", [])}
+        if self.c.detail != "full":
+            narrated |= {c for scene in scenes for edge in (scene["screen"].get("diagram") or {}).get("edges", [])
+                         for c in edge.get("claims", [])}
         for claim_id in sorted(self.c.planned - narrated):
-            essential = claim_id in self.c.essential
+            essential = self.c.detail == "full" or claim_id in self.c.essential
             self.issue("blocking" if essential else "warning", "claim_not_narrated",
                        f"Planned claim {claim_id} is not narrated"
-                       + ("; it is part of the main answer or a required caveat." if essential else "."),
+                       + ("; full detail requires every planned claim." if self.c.detail == "full" else
+                          "; it is part of the main answer or a required caveat." if essential else "."),
                        action="Narrate it, or revise the plan and give the omission a reason.")
 
     def _check_whole(self, scenes: list[dict]) -> None:

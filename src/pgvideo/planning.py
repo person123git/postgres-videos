@@ -289,7 +289,7 @@ class _Check:
             outline.append(item)
         for claim_id in claims:
             if claim_id not in used:
-                self.issue("warning", "unplanned_claim", f"Claim {claim_id} is in no outline item and will not be "
+                self.issue("blocking" if self.raw["detail"] == "full" else "warning", "unplanned_claim", f"Claim {claim_id} is in no outline item and will not be "
                            "narrated.", claim=claim_id)
         answer = set(self.raw["main_answer"]["claims"])
         positions = [n for n, item in enumerate(outline) if answer & set(item["claims"])]
@@ -332,6 +332,9 @@ class _Check:
                 self.issue("warning", "omitted_but_selected", f"Section {item['section']} is listed as omitted, but "
                            "the plan selects claims from it.", section=item["section"])
             omissions.append({"section": item["section"], "heading": section["heading"], "reason": item["reason"]})
+            if self.raw["detail"] == "full" and section["eligible"] and section["blocks"]:
+                self.issue("blocking", "full_section_omitted", "Full detail cannot omit an eligible section; teach "
+                           "its unique content or report the source conflict.", section=item["section"])
             if self._is_essential(section):
                 self._essential(section, omitted=True, selected=item["section"] in selected)
             elif section["caveat"] or section["role"] == "open_questions":
@@ -414,7 +417,9 @@ class _Check:
                            action="Shorten optional detail, or mark the plan infeasible with a note.")
             elif total < low:
                 self.issue("note", "under_budget", f"The outline budgets {total} seconds, under the {target}-minute "
-                           "target; a short page may need less.")
+                           "target's lower bound. Check feasibility before building.",
+                           action="Expand using unused allowed source content, or mark the plan infeasible if the "
+                                  "document cannot reach the target without repetition or padding.")
         return estimate
 
     def _sections(self, claims: dict[str, dict], omissions: list[dict]) -> list[dict]:
@@ -480,6 +485,9 @@ def _update_manifest(root: Path, run_dir: Path, *, status: str, record: dict | N
                      digest: str | None = None, evidence_digest: str | None = None, error: str | None = None) -> dict:
     path = run_dir / "manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    from .orchestration import remember_duration_miss
+
+    remember_duration_miss(root, run_dir, manifest)
     manifest["status"] = {"passed": "plan_ready"}.get(status, status)
     invalidate_after(manifest, "plan")
     entry: dict = {"status": status}

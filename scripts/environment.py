@@ -9,6 +9,7 @@ documented set of operating system paths.
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import errno
 import hashlib
@@ -967,10 +968,11 @@ def main() -> int:
         doctor(lock, sample="--sample" in sys.argv[2:])
         return 0
     if command == "test":
-        if sys.argv[2:]:
-            raise EnvironmentError("test accepts no arguments")
+        test_parser = argparse.ArgumentParser(prog="pgvideo test", description="Run project tests in the local sandbox.")
+        test_parser.add_argument("--pattern", default="test*.py", help="unittest discovery filename pattern")
+        test_args = test_parser.parse_args(sys.argv[2:])
         doctor(lock, sample=False, announce=False)
-        return run_local([str(PYTHON), "-I", "-m", "unittest", "discover", "-s", "tests", "-v"],
+        return run_local([str(PYTHON), "-I", "-m", "unittest", "discover", "-s", "tests", "-p", test_args.pattern, "-v"],
                          check=False).returncode
     doctor(lock, sample=False, announce=False)
     # Pass the application's exit status through; it reports its own errors.

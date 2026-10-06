@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pgvideo.invalid/schemas/media-review.schema.json",
+  "title": "pgvideo finished-video review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "request_id", "video_sha256", "storyboard_digest", "producer", "scenes", "checks", "summary"],
+  "properties": {
+    "schema": {"const": "pgvideo/media-review/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "video_sha256": {"$ref": "plan.schema.json#/$defs/digest"},
+    "storyboard_digest": {"$ref": "plan.schema.json#/$defs/digest"},
+    "producer": {"$ref": "plan.schema.json#/$defs/producer"},
+    "scenes": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["scene", "visual", "listening", "captions", "message"],
+        "properties": {
+          "scene": {"type": "string", "minLength": 1},
+          "visual": {"$ref": "#/$defs/verdict"},
+          "listening": {"$ref": "#/$defs/verdict"},
+          "captions": {"$ref": "#/$defs/verdict"},
+          "message": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      }
+    },
+    "checks": {
+      "type": "object", "additionalProperties": false,
+      "required": ["playback", "transitions", "pacing", "ending", "caption_sync"],
+      "properties": {
+        "playback": {"$ref": "#/$defs/check"},
+        "transitions": {"$ref": "#/$defs/check"},
+        "pacing": {"$ref": "#/$defs/check"},
+        "ending": {"$ref": "#/$defs/check"},
+        "caption_sync": {"$ref": "#/$defs/check"}
+      }
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 2000}
+  },
+  "$defs": {
+    "verdict": {"enum": ["passed", "failed", "unavailable"]},
+    "check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verdict", "message"],
+      "properties": {
+        "verdict": {"$ref": "#/$defs/verdict"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    }
+  }
+}

@@ -12,7 +12,8 @@ prepare ─► sources ─► document ─► glossary ─► glossary_check ─
    harness writes plan.json ──► plan ◄─────────────────────────────┘
    harness writes storyboard ─► script
    separate context writes review ─► content_review   (the content gate)
-build ─► narration ─► duration check ─► timing ─► render ─► validation ─► delivery
+build ─► narration ─► duration check ─► timing ─► render ─► validation
+media-review ─► visual + listening + captions + MP4 playback ─► delivery
 ```
 
 Only pgvideo writes stage statuses, in `runs/<request-id>/manifest.json`. A stage that is repeated drops the
@@ -48,11 +49,13 @@ the user; a person must decide), or `deliver`.
 | `plan --request <id> --file <plan.json> [--human-revision]` | Validates and records the content plan. An import that does not pass counts toward the plan repair limit; after pgvideo stops a repair that is not converging, a further import is refused (`repair_stopped`) unless a person made the revision. | `plan.json`, `plan-report.md`, `authored/plan.json` |
 | `script --request <id> --storyboard <file> [--duration-rewrite] [--human-revision]` | Validates and records a harness storyboard. Never starts narration. `--drafter-command <exe>` runs an optional adapter instead. | `draft-input.json`, `storyboard.json`, `script.md`, `authored/storyboard.json` |
 | `review --request <id> --file <review.json>` | Validates the separate review and decides the content gate. | `content-review.json`, `content-report.md`, `authored/review.json` |
-| `build --request <id> [--no-reuse] [--accept-duration]` | Refuses without the content gate. Narrates, checks the measured length, times, renders, validates, and delivers, reusing a validated video with the same inputs. | `narration/`, `timeline.json`, captions, `render/`, `quality-report.json`, `output/<id>/` |
+| `review-input --request <id>` | Returns the accepted plan without the writer's assessments, plus current digests and review targets. The independent reviewer uses this view instead of reading `plan.json` or `plan-report.md`. | — |
+| `build --request <id> [--no-reuse] [--accept-duration]` | Refuses without the content gate. Narrates, checks measured length, times, renders, and validates, reusing matching media. Returns `passed` with a prepared package; final delivery awaits media review. | `narration/`, `timeline.json`, captions, `render/`, `quality-report.json`, `delivery/` inside the run |
+| `media-review --request <id> --file <media-review.json>` | Checks that an actual visual, listening, caption, and playback review covers the exact current video and every scene. Failed or unavailable checks block delivery. A completed result publishes the package. | `media-review.json`, `authored/media-review.json`, `output/<id>/` |
 | `resume --request <id>` | Repeats the cross-check with `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review without inference. | as the stages it repeats |
 | `replay --request <id> --from <other>` | Revalidates another request's accepted plan, storyboard, and review for this request, when the evidence, prompts, and review policy match. No inference. | as `plan`, `script`, `review` |
 | `baseline --request <id>` | Drafts the old extractive script for comparison. Never narrated or delivered. | `baseline/storyboard.json`, `baseline/script.md` |
-| `note --request <id> --kind visual\|listening --text "…"` | Records a media check that was actually performed, after delivery. | `orchestration.json` |
+| `note --request <id> --kind visual\|listening --text "…"` | Records supplementary observations after media validation. Does not open the final media-review gate. | `orchestration.json` |
 | `narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage. The same content gate applies. | as `build` |
 
 A result folds issues that share a severity and code into one issue when there are more than three: it has a
@@ -109,6 +112,18 @@ storyboard and plan. The review passes only when every factual target is `suppor
 no finding is material. Old requests (made before this workflow) are not gated and keep their extractive
 provenance.
 
+The review also covers every heading, screen line, diagram node, code/table excerpt, and glossary card, and
+requires one source-to-video coverage judgment per eligible section with content. Full detail cannot omit an
+eligible section or leave a planned claim unnarrated. The reviewer checks source material absent from the plan.
+Authored plan wording and selection are permitted inputs; writer claim assessments and task notes are hidden.
+Only the isolated reviewer may correct review judgments. Required authoring self-checks authorize patches before import.
+
+Final delivery has a second gate. Automated validation prepares a package under `runs/<id>/delivery/` without
+publishing it to the configured output. `status.media_review_input` names the MP4 hash, storyboard digest, and
+scene IDs. `media-review` requires visual, listening, and caption checks for every scene and whole-video playback,
+transition, pacing, ending, and caption-sync checks. Successful import verifies the prepared files' hashes and
+publishes them. `note` cannot substitute for these checks. See `prompts/media-review.md` and its schema.
+
 ## Recovery
 
 | Situation | What to do |
@@ -120,10 +135,10 @@ provenance.
 | A plan repair does not converge | pgvideo stops it when three imports in a row report the same blocking issue, or ten in a row have not passed (`status` reports `repairs.plan_imports`). Then escalate; a plan a person revises is imported with `--human-revision`, and a plan that passes clears the limit. |
 | A storyboard needs review | Repair the named issues (prompts/repair.md) and import again. |
 | The review found material issues | Up to two repair rounds; each repaired storyboard needs a new separate review. Then escalate. |
-| The measured length missed the target | One `--duration-rewrite`, a new review, and `build`; then only the user may `--accept-duration`. |
+| The measured length missed the target | One `--duration-rewrite`: shorten optional detail when long; expand from unused allowed sources when short, revising the plan first if needed. If expansion is infeasible, report it. Then a new review and `build`; after the budget is used only the user may accept the length. |
 | `AGENTS.md` changed version | `resume` revalidates the saved plan, storyboard, and review under the new instructions. |
 | A model, credential, or quota is unavailable | Stop, keep progress, report the request ID and what is missing; retry transient failures without counting a repair. |
-| Media check failed | `build` again after fixing the cause; content is not regenerated. |
+| Finished-video review failed | Fix the earliest affected content or media stage, repeat dependent stages, then inspect the resulting MP4 again. Content repairs share the two-round storyboard budget. Stop for unavailable checks or an exhausted budget. |
 
 ## Files a harness request keeps
 
@@ -133,4 +148,4 @@ hashes, producer metadata the harness reported, repairs, events, and media check
 `content-report.md`, `authored/` (the exact files you submitted), `last-result.json`, and the media files. The
 delivery directory `output/<id>/` holds the MP4, `transcript.md`, captions, `references.md`,
 `glossary-check.md`, `content-report.md`, `plan.md`, `orchestration.json`, `quality-report.json`, and
-`manifest.json`.
+`manifest.json`, and `media-review.json`.

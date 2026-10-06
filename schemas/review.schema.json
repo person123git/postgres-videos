@@ -6,7 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "request_id", "storyboard_digest", "plan_digest", "evidence_digest", "reviewer", "producer",
-               "findings", "editorial", "summary"],
+               "findings", "editorial", "coverage", "summary"],
   "properties": {
     "schema": {"const": "pgvideo/review/v1"},
     "request_id": {"type": "string", "minLength": 1},
@@ -27,6 +27,15 @@
     "producer": {"$ref": "plan.schema.json#/$defs/producer"},
     "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
     "editorial": {"type": "array", "items": {"$ref": "#/$defs/editorial"}},
+    "coverage": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["section", "verdict", "justification"],
+      "properties": {
+        "section": {"type": "string", "minLength": 1},
+        "verdict": {"enum": ["complete", "allowed_omission", "missing_content"]},
+        "justification": {"type": "string", "minLength": 1, "maxLength": 600}
+      }
+    }},
     "summary": {"type": "string", "minLength": 1, "maxLength": 2000}
   },
   "$defs": {
@@ -35,7 +44,7 @@
       "additionalProperties": false,
       "required": ["target", "factual", "verdict", "evidence", "justification", "issues"],
       "properties": {
-        "target": {"type": "string", "pattern": "^(narration|screen|edge|tts):[a-z0-9][a-z0-9.-]*(:[0-9]+)?$"},
+        "target": {"type": "string", "pattern": "^(narration|screen|node|code|table|term|edge|tts):[a-z0-9][a-z0-9.-]*(:[0-9]+)?$"},
         "factual": {"type": "boolean", "description": "Whether the target states technical content, judged independently of its origin label"},
         "verdict": {"enum": ["supported", "contradicted", "insufficient_evidence", "not_factual"]},
         "evidence": {"type": "array", "items": {"$ref": "plan.schema.json#/$defs/reference"}},
@@ -61,7 +70,7 @@
       "required": ["scene", "code", "severity", "message"],
       "properties": {
         "scene": {"type": "string", "minLength": 1},
-        "code": {"enum": ["clarity", "missing_caveat", "repetition", "visual_mismatch", "ordering", "terminology",
+        "code": {"enum": ["clarity", "missing_caveat", "missing_content", "repetition", "visual_mismatch", "ordering", "terminology",
                           "pacing", "other"]},
         "severity": {"enum": ["material", "minor"]},
         "message": {"type": "string", "minLength": 1, "maxLength": 400}

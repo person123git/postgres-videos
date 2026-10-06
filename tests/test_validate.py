@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pgvideo.validate import validate_video
 from pgvideo.narration import _units
@@ -67,6 +68,34 @@ def delivery_fixture(run: Path, output: Path, detail: str | None = None) -> None
 
 
 class ValidationTests(unittest.TestCase):
+    def test_harness_validation_prepares_the_package_without_publishing_it(self):
+        with tempfile.TemporaryDirectory(prefix="pgvideo-validate-", dir=ROOT / ".runtime/tmp") as temporary:
+            run = Path(temporary) / "run"
+            output = Path(temporary) / "output"
+            output.mkdir()
+            delivery_fixture(run, output)
+            request = json.loads((run / "request.json").read_text())
+            request["workflow"] = {"kind": "harness"}
+            save(run / "request.json", request)
+            manifest = json.loads((run / "manifest.json").read_text())
+            for stage, name in (("plan", "plan.json"), ("content_review", "content-review.json"),
+                                ("evidence", "evidence-packet.json")):
+                manifest[stage] = {"sha256": save(run / name, {}), "digest": "0" * 64}
+            manifest["content_review"].update(policy=2, reviewer={"separation": "fresh_context"},
+                                            counts={"verdicts": {}, "minor": 0})
+            (run / "content-report.md").write_text("# Recorded content review\n")
+            (run / "plan-report.md").write_text("# Recorded plan\n")
+            save(run / "orchestration.json", {})
+            save(run / "manifest.json", manifest)
+            # Content/duration gates are tested in test_harness; this isolates actual FFmpeg validation and publication.
+            with patch("pgvideo.validate.require_content_gate"), patch("pgvideo.validate.require_duration"):
+                result = validate_video(ROOT, run)
+            self.assertEqual(result["status"], "passed")
+            self.assertTrue((run / "delivery/sample.mp4").is_file())
+            self.assertFalse((output / run.name).exists())
+            self.assertEqual(json.loads((run / "manifest.json").read_text())["status"], "media_review_pending")
+            self.assertEqual(json.loads((run / "quality-report.json").read_text())["media_review"], "pending")
+
     def test_audio_unit_split_keeps_punctuation_after_inline_code(self):
         text = ("When a backend initializes its status entry, it clears the activity string and "
                 "forces the last byte of the slot to `\\0`, "

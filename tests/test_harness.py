@@ -11,6 +11,7 @@ diagram edge.
 
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import tempfile
@@ -26,6 +27,7 @@ from pgvideo.orchestration import (MAX_PLAN_IMPORTS, MAX_REPAIR_ROUNDS, MAX_SAME
                                    duration_check, instructions, require_content_gate, require_duration)
 from pgvideo.planning import import_plan
 from pgvideo.review import import_review
+from pgvideo.media_review import import_media_review
 from pgvideo.script import create_script
 from test_crosscheck import ENGLISH, GLOSSARY, STATUS_PATH, postgres_snapshot
 from test_script import PAGE
@@ -736,6 +738,234 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(events[-1].get("revised_by"), "human")
 
     # Recovery ----------------------------------------------------------------------------------
+
+    def test_review_input_hides_writer_assessments_and_expands_screen_targets(self):
+        _result, run_dir = self.prepare()
+        _plan, storyboard = self.content(run_dir)
+        self.storyboard(run_dir, storyboard)
+        status, result, _stderr = self.command("review-input", "--request", run_dir.name)
+        self.assertEqual(status, 0, result)
+        view = result["review_input"]
+        self.assertTrue(view["plan"]["claims"])
+        for claim in view["plan"]["claims"]:
+            self.assertNotIn("assessment", claim)
+            self.assertNotIn("lexical", claim)
+        kinds = {t.split(":", 1)[0] for t in view["review_targets"]}
+        self.assertLessEqual({"screen", "node", "table", "code", "term"}, kinds)
+        self.assertTrue(all(f"screen:{s['id']}:0" in view["review_targets"] for s in storyboard["scenes"]))
+
+    def test_verbatim_excerpts_still_require_semantic_review(self):
+        _result, run_dir = self.prepare()
+        _plan, storyboard = self.content(run_dir)
+        self.storyboard(run_dir, storyboard)
+        review = recorded_review(self.workspace, run_dir)
+        excerpt = next(f for f in review["findings"] if f["target"].startswith("code:"))
+        excerpt.update(factual=False, verdict="not_factual", evidence=[])
+        record = import_review(self.workspace, run_dir,
+                               write(authored(self.workspace, run_dir, "review.json"), review))
+        self.assertEqual(record["status"], "needs_review")
+        self.assertIn("inconsistent_finding", self.blocking(self.load(run_dir, "content-review.json")))
+
+    def test_review_requires_source_to_video_coverage(self):
+        _result, run_dir = self.prepare()
+        _plan, storyboard = self.content(run_dir)
+        self.storyboard(run_dir, storyboard)
+        review = recorded_review(self.workspace, run_dir)
+        review["coverage"].pop()
+        path = authored(self.workspace, run_dir, "review.json")
+        with self.assertRaisesRegex(ValueError, "leaves eligible sections unchecked"):
+            import_review(self.workspace, run_dir, write(path, review))
+        review = recorded_review(self.workspace, run_dir)
+        review["coverage"][0].update(verdict="missing_content", justification="An example is absent from the plan.")
+        record = import_review(self.workspace, run_dir, write(path, review))
+        self.assertEqual(record["status"], "needs_review")
+        self.assertIn("missing_content", self.blocking(self.load(run_dir, "content-review.json")))
+
+    def test_full_detail_rejects_omissions_and_unnarrated_claims(self):
+        _result, run_dir = self.prepare("--detail", "full")
+        plan, storyboard = recorded_content(self.workspace, run_dir)
+        plan["omissions"].append({"section": "details", "reason": "Too much detail."})
+        record = import_plan(self.workspace, run_dir, write(authored(self.workspace, run_dir, "plan.json"), plan))
+        self.assertEqual(record["status"], "needs_review")
+        self.assertIn("full_section_omitted", self.blocking(self.load(run_dir, "plan.json")))
+        plan, storyboard = self.content(run_dir)
+        dropped = next(n for s in storyboard["scenes"] if s["part"] == "mechanism"
+                       for n in s["narration"] if n.get("claims"))
+        for s in storyboard["scenes"]:
+            s["narration"] = [n for n in s["narration"] if n is not dropped]
+        _record, accepted = self.storyboard(run_dir, storyboard)
+        self.assertIn("claim_not_narrated", self.blocking(accepted))
+
+    def prepared_media(self, run_dir: Path) -> dict:
+        """Recorded renderer output for gate tests; no audiovisual quality claim is made by this fixture."""
+        accept_content(self.workspace, run_dir)
+        draft = run_dir / "render/draft.mp4"
+        draft.parent.mkdir(parents=True, exist_ok=True)
+        draft.write_bytes(b"recorded video bytes")
+        staged = run_dir / "delivery"
+        staged.mkdir()
+        files = {}
+        for name, data in (("video.mp4", draft.read_bytes()), ("captions.srt", b"recorded captions"),
+                           ("captions.vtt", b"recorded web captions"),
+                           ("orchestration.json", (run_dir / "orchestration.json").read_bytes())):
+            (staged / name).write_bytes(data)
+            if name.startswith("captions."):
+                (run_dir / name).write_bytes(data)
+            files[name] = hashlib.sha256(data).hexdigest()
+        manifest = self.load(run_dir, "manifest.json")
+        manifest["render"] = {"status": "passed", "draft_sha256": files["video.mp4"]}
+        manifest["timing"] = {"status": "passed", "srt_sha256": files["captions.srt"],
+                              "vtt_sha256": files["captions.vtt"]}
+        manifest["narration"] = {"status": "passed", "duration_check": {"status": "passed"}}
+        quality = {"status": "passed", "checks": {}, "delivery": {"directory": str(staged), "files": files}}
+        body = (json.dumps(quality, indent=2) + "\n").encode()
+        (run_dir / "quality-report.json").write_bytes(body)
+        manifest["validation"] = {"status": "passed", "sha256": hashlib.sha256(body).hexdigest(),
+                                  "record": "quality-report.json", "output": str(staged.relative_to(self.workspace)),
+                                  "video": "video.mp4", "duration_seconds": 120}
+        write(run_dir / "manifest.json", manifest)
+        return {"schema": "pgvideo/media-review/v1", "request_id": run_dir.name,
+                "video_sha256": files["video.mp4"], "storyboard_digest": manifest["script"]["digest"],
+                "producer": {"harness": {"name": "recorded-test-reviewer"}, "prompt": "prompts/media-review.md"},
+                "scenes": [{"scene": s["id"], "visual": "passed", "listening": "passed", "captions": "passed",
+                            "message": "Recorded completed inspection."}
+                           for s in self.load(run_dir, "storyboard.json")["scenes"]],
+                "checks": {kind: {"verdict": "passed", "message": "Recorded completed inspection."}
+                           for kind in ("playback", "transitions", "pacing", "ending", "caption_sync")},
+                "summary": "Recorded inspection of the exact video."}
+
+    def test_build_prepares_media_but_does_not_deliver_without_inspection(self):
+        _result, run_dir = self.prepare()
+        self.prepared_media(run_dir)
+        with patch("pgvideo.cli._build", return_value=0):
+            status, result, _stderr = self.command("build", "--request", run_dir.name)
+        self.assertEqual((status, result["status"]), (0, "passed"))
+        self.assertNotIn("delivery", result)
+        self.assertEqual(result["next_actions"][0]["phase"], "media_review")
+        self.assertFalse((self.workspace / "output" / run_dir.name).exists())
+        self.command("note", "--request", run_dir.name, "--kind", "visual", "--text", "A supplementary note.")
+        _code, current, _stderr = self.command("status", "--request", run_dir.name)
+        self.assertEqual(current["next_actions"][0]["phase"], "media_review")
+
+    def test_media_review_blocks_unavailable_listening_and_failed_playback(self):
+        _result, run_dir = self.prepare()
+        review = self.prepared_media(run_dir)
+        path = authored(self.workspace, run_dir, "media-review.json")
+        review["scenes"][0]["listening"] = "unavailable"
+        review["checks"]["playback"]["verdict"] = "failed"
+        record = import_media_review(self.workspace, run_dir, write(path, review))
+        self.assertEqual(record["status"], "needs_review")
+        self.assertLessEqual({"media_listening", "media_playback"},
+                             self.blocking(self.load(run_dir, "media-review.json")))
+        _code, result, _stderr = self.command("status", "--request", run_dir.name)
+        self.assertEqual(result["next_actions"][0]["action"], "escalate")
+        self.assertFalse((self.workspace / "output" / run_dir.name).exists())
+
+    def test_media_review_rejects_missing_scenes_and_changed_video(self):
+        _result, run_dir = self.prepare()
+        review = self.prepared_media(run_dir)
+        path = authored(self.workspace, run_dir, "media-review.json")
+        incomplete = copy.deepcopy(review)
+        incomplete["scenes"].pop()
+        with self.assertRaisesRegex(ValueError, "leaves scenes unchecked"):
+            import_media_review(self.workspace, run_dir, write(path, incomplete))
+        (run_dir / "render/draft.mp4").write_bytes(b"different video")
+        with self.assertRaisesRegex(ValueError, "video changed"):
+            import_media_review(self.workspace, run_dir, write(path, review))
+
+    def test_media_review_delivers_only_the_reviewed_package(self):
+        _result, run_dir = self.prepare()
+        review = self.prepared_media(run_dir)
+        path = authored(self.workspace, run_dir, "media-review.json")
+        status, result, _stderr = self.command("media-review", "--request", run_dir.name,
+                                               "--file", str(write(path, review)))
+        self.assertEqual((status, result["status"]), (0, "completed"), result)
+        self.assertEqual(result["next_actions"][0]["action"], "deliver")
+        destination = Path(result["delivery"]["directory"])
+        self.assertEqual((destination / "video.mp4").read_bytes(), b"recorded video bytes")
+        self.assertTrue((destination / "media-review.json").is_file())
+        self.assertEqual(self.load(destination, "quality-report.json")["listening_review"], "passed: all scenes")
+        self.assertEqual(self.load(destination, "manifest.json")["status"], "completed")
+
+    def test_media_review_rejects_changed_prepared_captions(self):
+        _result, run_dir = self.prepare()
+        review = self.prepared_media(run_dir)
+        (run_dir / "delivery/captions.srt").write_bytes(b"changed captions")
+        with self.assertRaisesRegex(ValueError, "member changed"):
+            import_media_review(self.workspace, run_dir, write(authored(self.workspace, run_dir, "media-review.json"), review))
+        self.assertFalse((self.workspace / "output" / run_dir.name).exists())
+
+    def test_media_review_rejects_inputs_changed_since_automated_validation(self):
+        for name in ("plan.json", "captions.srt"):
+            with self.subTest(name=name):
+                _result, run_dir = self.prepare()
+                review = self.prepared_media(run_dir)
+                with (run_dir / name).open("ab") as file:
+                    file.write(b" ")
+                with self.assertRaisesRegex(ValueError, "does not match the SHA-256"):
+                    import_media_review(self.workspace, run_dir,
+                        write(authored(self.workspace, run_dir, "media-review.json"), review))
+                self.assertFalse((self.workspace / "output" / run_dir.name).exists())
+
+    def test_failed_media_content_can_be_repaired_with_the_existing_budget(self):
+        _result, run_dir = self.prepare()
+        review = self.prepared_media(run_dir)
+        review["scenes"][0]["visual"] = "failed"
+        import_media_review(self.workspace, run_dir,
+                            write(authored(self.workspace, run_dir, "media-review.json"), review))
+        _code, result, _stderr = self.command("status", "--request", run_dir.name)
+        self.assertEqual((result["next_actions"][0]["action"], result["next_actions"][0]["phase"]),
+                         ("author", "repair"))
+        storyboard = self.load(run_dir, "authored/storyboard.json")
+        self.storyboard(run_dir, storyboard)
+        manifest = self.load(run_dir, "manifest.json")
+        self.assertNotIn("media_review", manifest)
+        self.assertNotIn("validation", manifest)
+        self.assertEqual(self.load(run_dir, "orchestration.json")["repairs"]["storyboard"], 1)
+
+    def test_media_review_rejects_a_stale_storyboard_and_duplicate_scene(self):
+        _result, run_dir = self.prepare()
+        review = self.prepared_media(run_dir)
+        path = authored(self.workspace, run_dir, "media-review.json")
+        changed = copy.deepcopy(review)
+        changed["storyboard_digest"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "another storyboard"):
+            import_media_review(self.workspace, run_dir, write(path, changed))
+        review["scenes"].append(dict(review["scenes"][0]))
+        with self.assertRaisesRegex(ValueError, "duplicate scene"):
+            import_media_review(self.workspace, run_dir, write(path, review))
+
+    def test_duration_recovery_distinguishes_short_and_long_videos(self):
+        _result, run_dir = self.prepare()
+        accept_content(self.workspace, run_dir)
+        for seconds, direction, instruction in ((1, "short", "Expand using unused allowed source content"),
+                                                 (10000, "long", "Shorten optional detail")):
+            check = duration_check(run_dir, seconds)
+            self.assertEqual(check["direction"], direction)
+            manifest = self.load(run_dir, "manifest.json")
+            manifest["narration"] = {"status": "passed", "duration_check": check}
+            write(run_dir / "manifest.json", manifest)
+            _code, result, _stderr = self.command("status", "--request", run_dir.name)
+            self.assertIn(instruction, result["next_actions"][0]["reason"])
+
+    def test_duration_rewrite_survives_a_required_plan_revision(self):
+        _result, run_dir = self.prepare()
+        accept_content(self.workspace, run_dir)
+        manifest = self.load(run_dir, "manifest.json")
+        manifest["narration"] = {"status": "passed", "duration_check": duration_check(run_dir, 1)}
+        write(run_dir / "manifest.json", manifest)
+        plan = self.load(run_dir, "authored/plan.json")
+        plan["outline"][0]["budget_seconds"] += 1
+        record = import_plan(self.workspace, run_dir, write(authored(self.workspace, run_dir, "plan.json"), plan))
+        self.assertEqual(record["status"], "passed")
+        self.assertNotIn("narration", self.load(run_dir, "manifest.json"))
+        _code, result, _stderr = self.command("status", "--request", run_dir.name)
+        self.assertIn("--duration-rewrite", result["next_actions"][0]["command"])
+        storyboard = self.load(run_dir, "authored/storyboard.json")
+        storyboard["plan_digest"] = record["digest"]
+        record, _accepted = self.storyboard(run_dir, storyboard, duration_rewrite=True)
+        self.assertEqual(record["status"], "passed")
+        self.assertEqual(self.load(run_dir, "orchestration.json")["repairs"]["duration"], 1)
 
     def test_resume_and_replay_revalidate_saved_content_without_inference(self):
         _result, first = self.prepare()

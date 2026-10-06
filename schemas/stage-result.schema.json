@@ -19,7 +19,7 @@
     "next_actions": {"type": "array", "items": {
       "type": "object", "required": ["action", "reason"],
       "properties": {"action": {"enum": ["run", "author", "escalate", "deliver"]},
-                     "phase": {"enum": ["plan", "draft", "review", "repair"]},
+                     "phase": {"enum": ["plan", "draft", "review", "repair", "media_review"]},
                      "command": {"type": "string"}, "reason": {"type": "string"}, "then": {"type": "string"}}}},
     "message": {"type": "string"}
   }

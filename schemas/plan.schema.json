@@ -124,7 +124,7 @@
           {"type": "object", "additionalProperties": false,
            "properties": {"requested": {"type": "string"}, "resolved": {"type": "string"}, "provider": {"type": "string"}}}
         ]},
-        "prompt": {"enum": ["prompts/plan.md", "prompts/draft.md", "prompts/review.md", "prompts/repair.md"]},
+        "prompt": {"enum": ["prompts/plan.md", "prompts/draft.md", "prompts/review.md", "prompts/repair.md", "prompts/media-review.md"]},
         "parameters": {"oneOf": [{"const": "unavailable"}, {"type": "object"}]},
         "usage": {"oneOf": [{"const": "unavailable"}, {"type": "object", "additionalProperties": {"type": "number"}}]},
         "latency_seconds": {"oneOf": [{"const": "unavailable"}, {"type": "number", "minimum": 0}]},

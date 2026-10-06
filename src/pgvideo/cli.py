@@ -126,7 +126,7 @@ def parser() -> argparse.ArgumentParser:
                         help="executable inside the project that reads draft-input.json on stdin and writes scenes "
                              "on stdout (an optional adapter)")
     script.add_argument("--duration-rewrite", action="store_true",
-                        help="this storyboard shortens optional detail after the measured narration missed the target")
+                        help="this storyboard shortens or expands allowed content after a measured duration miss")
     script.add_argument("--human-revision", action="store_true",
                         help="a person revised this storyboard after the automatic repair budget was used")
     script.add_argument("--no-reuse", action="store_true", help=NO_REUSE + " (older requests only)")
@@ -134,6 +134,9 @@ def parser() -> argparse.ArgumentParser:
     review = request_command("review", "import the separate semantic review of the storyboard and decide the "
                                        "content gate")
     review.add_argument("--file", type=Path, required=True, help="review file (JSON or YAML) inside the project")
+    request_command("review-input", "show the accepted plan without writer assessments, plus the review contract")
+    media_review = request_command("media-review", "import inspection of every scene and finished MP4 before delivery")
+    media_review.add_argument("--file", type=Path, required=True, help="finished-video review file inside the project")
 
     build = request_command("build", "narrate, time, render, and validate an accepted storyboard, reusing "
                                      "matching narration and media")
@@ -510,6 +513,34 @@ def _import_storyboard(root: Path, run_dir: Path, **options) -> tuple[str, str]:
                               f"Script: {run_dir / record['script']}.")
 
 
+def review_input(args: argparse.Namespace, root: Path) -> int:
+    from .review import review_input as input_view
+
+    def work(run_dir: Path):
+        _require_harness(run_dir, "review-input")
+        return "passed", "Review input excludes the writer's claim assessments.", {"review_input": input_view(run_dir)}
+
+    return _harness_command(root, args, "review_input", work)
+
+
+def media_review(args: argparse.Namespace, root: Path) -> int:
+    from .media_review import import_media_review
+
+    def work(run_dir: Path):
+        _require_harness(run_dir, "media-review")
+        record = import_media_review(root, run_dir, args.file)
+        if record["status"] != "completed":
+            return record["status"], f"Finished-video review {record['status']}; see {run_dir / 'media-review.json'}."
+        quality = json.loads((run_dir / "quality-report.json").read_text(encoding="utf-8"))
+        output = Path(quality["delivery"]["directory"])
+        return "completed", f"Reviewed video delivered to {output}.", {"delivery": {
+            "directory": str(output), "video": str(output / json.loads((run_dir / "manifest.json").read_text())["validation"]["video"]),
+            "files": [{"path": str(output / name), "sha256": digest} for name, digest in
+                      quality["delivery"]["files"].items()]}}
+
+    return _harness_command(root, args, "media_review", work)
+
+
 def build(args: argparse.Namespace, root: Path) -> int:
     def work(run_dir: Path) -> tuple[str, str]:
         from .orchestration import require_content_gate
@@ -522,6 +553,9 @@ def build(args: argparse.Namespace, root: Path) -> int:
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
         validation = manifest.get("validation") or {}
         if code == 0:
+            if validation.get("status") == "passed":
+                return "passed", (f"Video prepared at {run_dir / 'render/draft.mp4'}; automated validation passed. "
+                                  "Inspect the finished video and import `media-review` before final delivery.")
             output = root / validation["output"]
             quality = json.loads((run_dir / "quality-report.json").read_text(encoding="utf-8"))
             delivery = {"directory": str(output), "video": str(output / validation["video"]),
@@ -529,8 +563,7 @@ def build(args: argparse.Namespace, root: Path) -> int:
                                   for name, digest in quality["delivery"]["files"].items()]}
             return "completed", (f"Delivered {output / validation['video']} ({validation['duration_seconds']:.1f} "
                                  "seconds) with its transcript, captions, references, glossary and content reports, "
-                                 "and quality report. No listening review has been recorded; record one you "
-                                 "actually made with `note`."), {"delivery": delivery}
+                                 "and quality report."), {"delivery": delivery}
         if code == NEEDS_REVIEW:
             return "needs_review", "Build stopped for review; see the issues and next actions."
         return "failed", "Build failed; the error is above."
@@ -716,16 +749,29 @@ def note(args: argparse.Namespace, root: Path) -> int:
         if not text or len(text) > 2000:
             raise ValueError("--text must be 1 to 2000 characters.")
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-        if (manifest.get("validation") or {}).get("status") != "completed":
-            raise ValueError("Record a media check after `build` delivered the video.")
+        if (manifest.get("validation") or {}).get("status") not in ("passed", "completed"):
+            raise ValueError("Record a media check after `build` prepared the video.")
         record = load_record(run_dir)
         record.setdefault("media_reviews", []).append({
             "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "kind": args.kind, "text": text,
             "video_sha256": manifest["render"]["draft_sha256"]})
         save_record(root, run_dir, record)
         delivery = root / manifest["validation"]["output"]
-        if (delivery / ORCHESTRATION).is_file():
+        if manifest["validation"]["status"] == "completed" and (delivery / ORCHESTRATION).is_file():
             (delivery / ORCHESTRATION).write_bytes((run_dir / ORCHESTRATION).read_bytes())
+            quality_path = run_dir / "quality-report.json"
+            quality = json.loads(quality_path.read_text(encoding="utf-8"))
+            quality["delivery"]["files"][ORCHESTRATION] = hashlib.sha256(
+                (delivery / ORCHESTRATION).read_bytes()).hexdigest()
+            body = (json.dumps(quality, indent=2) + "\n").encode()
+            from .sources import write_atomic
+
+            write_atomic(root, quality_path.relative_to(root), body, label="Request")
+            (delivery / "quality-report.json").write_bytes(body)
+            manifest["validation"]["sha256"] = hashlib.sha256(body).hexdigest()
+            body = (json.dumps(manifest, indent=2) + "\n").encode()
+            write_atomic(root, (run_dir / "manifest.json").relative_to(root), body, label="Request")
+            (delivery / "manifest.json").write_bytes(body)
         return "passed", f"Recorded the {args.kind} check in {run_dir / ORCHESTRATION}."
 
     return _harness_command(root, args, "note", work)
@@ -819,6 +865,7 @@ def _duration_ok(root: Path, run_dir: Path, accept: bool) -> bool:
     write_atomic(root, run_dir.relative_to(root) / "manifest.json",
                  (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8"), label="Request")
     record = load_record(run_dir)
+    record.pop("pending_duration_check", None)
     record["accepted_duration"] = {"at": now, "measured_seconds": check["measured_seconds"],
                                    "storyboard_digest": manifest["script"].get("digest")}
     save_record(root, run_dir, record)
@@ -920,7 +967,8 @@ def _validate(root: Path, run_dir: Path) -> int:
     output = root / result["output"]
     report = json.loads((run_dir / result["record"]).read_text())
     reuse = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8")).get("reuse") or {}
-    print(f"Video: {output / result['video']} ({result['duration_seconds']:.3f} seconds)")
+    label = "Prepared video (media review pending)" if result["status"] == "passed" else "Video"
+    print(f"{label}: {output / result['video']} ({result['duration_seconds']:.3f} seconds)")
     print(f"Document: {report['document']['url']} (PostgreSQL {report['document']['postgresql_version']})")
     extra = ", ".join(str(output / name) for name in ("content-report.md", "plan.md", "orchestration.json")
                       if (output / name).is_file())
@@ -1087,6 +1135,7 @@ def script(args: argparse.Namespace, root: Path) -> int:
 
 
 COMMANDS = {"prepare": prepare, "status": status, "plan": plan, "script": script, "review": review, "build": build,
+            "review-input": review_input, "media-review": media_review,
             "resume": resume, "replay": replay, "excerpt": excerpt, "packet": packet, "revise": revise,
             "baseline": baseline,
             "note": note, "narrate": narrate, "timing": timing, "render": render, "validate": validate}

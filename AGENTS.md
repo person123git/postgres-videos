@@ -1,4 +1,4 @@
-<!-- instructions-version: 10 -->
+<!-- instructions-version: 11 -->
 # AGENTS.md: pgvideo workflow
 
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
@@ -11,8 +11,9 @@ For all repository work, use the temporary-file convention below.
 1. Before a file write, use [the write decision table](#mandatory-file-writing-and-recovery).
    **An existing plan, storyboard, or review that parses as JSON MUST be changed with
    `scripts/pgvideo revise`. This includes files rejected by a schema or content check.**
-2. The model output limit is **32k tokens**, including tool-call arguments. Size each write to fit the
-   remaining output budget, leaving headroom for wrappers, escaping, and completing the call.
+2. Use **32k tokens as a configured ceiling**, including tool-call arguments, or the actual model/tool limit
+   when lower. Size each write to fit the remaining budget, leaving headroom for wrappers, escaping, and
+   completing the call. If the runtime limit is unknown, use conservative bounded chunks.
    After a size failure or `Unterminated string`, inspect what was saved and reduce the next write.
    **Never resend the whole file, even under a new name.**
 3. After a failed command, inspect its exact error and correct the cause. Follow
@@ -34,9 +35,13 @@ For each video request, use the one Markdown document the user names in `person1
 You write the plan and storyboard and arrange an independent review. pgvideo validates artifacts, records
 stage statuses, generates Kokoro narration, renders the video, and delivers the files.
 
-Order: **prepare → plan → script → independent review → review import → build → inspect → deliver**.
+Order: **prepare → plan → script → independent review → review import → build → finished-video review → deliver**.
 Each stage must pass before its dependent stage. Recovery uses `status` and resumes at the first incomplete
 or invalid stage; it does not start a new request.
+
+Check early that an isolated reviewer and tools for visual inspection, listening, and MP4 playback are available.
+Report missing capabilities when discovered. Preserve progress at the stage that needs them; a textual review
+cannot substitute for listening or playback, and an unavailable required check cannot pass delivery.
 
 ## Rules that apply at every stage
 
@@ -124,6 +129,9 @@ directory per PostgreSQL version), but they play different roles.
 - Store editable video inputs there, for example `.scratch/<id>/plan.v1.json`. Only the first draft (`.v1`) is
   written by you. Every later revision, such as `plan.v2.json`, is the `--out` of `scripts/pgvideo revise`;
   syntax-only recovery copies a broken draft on disk instead.
+- Each new storyboard digest gets its own independent review draft, for example
+  `.scratch/<id>/reviews/<storyboard-digest>/review.v1.json`. A new review of changed content is a first draft;
+  corrections to that review use `revise`. Only the isolated reviewer may create or change its judgments.
 - Let pgvideo manage its runtime temporary files through `scripts/pgvideo`; the wrapper configures
   `.runtime/tmp/`. The `.scratch/` recommendation applies to files you create while working on the project.
 
@@ -170,7 +178,8 @@ These restrictions apply even when the first import failed and nothing has been 
 
 ### Write-size limits
 
-- The model output budget is **32k tokens** per response, including tool-call arguments. Count all emitted
+- The configured output ceiling is **32k tokens** per response; use the actual model/tool limit when lower.
+  This includes tool-call arguments. Count all emitted
   content together: file content, patch text, helper scripts, wrappers, escaping, and surrounding text.
   Leave headroom to finish the call; split content into smaller chunks when it will not fit.
 - There is no separate fixed line or character cap for an initial write. Respect any lower tool limit and
@@ -288,7 +297,7 @@ Correct:
 ## Tool use and file ownership
 
 - Run project commands through `scripts/pgvideo`. Read `scripts/pgvideo <command> --help` before first use.
-  Exception: `doctor` has no `--help`; run it directly.
+  Exception: `doctor` has no `--help`; run it directly. `test --pattern <filename-glob>` runs a focused subset.
 - Check the environment with `scripts/pgvideo doctor`. If provisioning is needed, use `scripts/setup` once,
   then check again. Do not install host packages, bypass the sandbox, or run project Python another way.
 - Run every script with the project virtual environment, `.venv/`. `scripts/pgvideo` already uses
@@ -313,7 +322,7 @@ Read `status`, `issues`, and `next_actions`. Do not infer success from a file's 
 | Result | Required action |
 | --- | --- |
 | `passed` (exit 0) | Follow `next_actions`. This stage passed; the video may still be incomplete. |
-| `completed` (exit 0) | Confirm the build completed, then inspect and deliver as described below. |
+| `completed` (exit 0) | Confirm the final media review passed and return the delivered paths. Older extractive requests retain their original delivery workflow. |
 | `needs_review` (exit 3) | Follow the named repair or escalation. Do not continue to a dependent stage. |
 | `failed` (exit 1) | Read the error. Stop for an integrity failure, an unavailable required capability, or a `repair_stopped` issue. Otherwise correct the cause or retry a transient failure. |
 
@@ -407,9 +416,10 @@ Remove repeats in the plan, before the storyboard exists. In the commands, use y
 2. When the draft is complete, list the source evidence that claims in three or more outline items cite:
 
    ```sh
-   jq -r '([.outline[] | .id as $o | .claims[] | {key: ., value: $o}] | from_entries) as $item
-     | [.claims[] | select(.kind != "definition") | .id as $c | (.assessment.evidence // [])[]
-        | select(startswith("pg:")) | {e: ., c: $c, o: $item[$c]}]
+   jq -r '.claims as $claims
+     | [.outline[] | .id as $o | .claims[] as $c
+        | $claims[] | select(.id == $c and .kind != "definition")
+        | (.assessment.evidence // [])[] | select(startswith("pg:")) | {e: ., c: $c, o: $o}]
      | group_by(.e)[] | select((map(.o) | unique | length) >= 3)
      | "\(map(.o) | unique | length)\t\(.[0].e)\t\(map(.c) | unique | join(" "))"' \
      ".scratch/<id>/plan.v1.json" | sort -rn > ".scratch/<id>/repeats-plan.tsv"
@@ -451,8 +461,8 @@ and the accepted plan. Fetch the sections, evidence, and glossary entries the pl
 - Follow the draft prompt's layout limits and exact-copy rules for code, tables, and glossary definitions.
 - Keep all required qualifications. Budget the script against the accepted plan.
 
-Before the import, check the draft for repeats. Both commands must print nothing. The only allowed hit is the
-closing takeaway repeating a sentence of the main answer. Fix every other hit with `revise`: keep the sentence
+Before the import, check the draft for repeats. Require no unpermitted hits. Apply rule 9's exceptions for the
+question, main answer, and one supported closing takeaway. Fix every other hit with `revise`: keep the sentence
 or definition in one narration item and remove it from the others. When two plan claims cause the repeat, fix
 the plan first. In the commands, use your latest revision's filename.
 
@@ -484,15 +494,22 @@ the writer's context does not meet this requirement. If no separate context is a
 The reviewer must not read the writer's task notes.
 
 Give the reviewer these instructions, [prompts/review.md](prompts/review.md),
-[schemas/review.schema.json](schemas/review.schema.json), the current accepted `storyboard.json` and `plan.json`,
-and the evidence packet through `packet`. Supply the current `status` digests and `review_targets`, or let the
-reviewer obtain them. Allow `excerpt` for additional pinned evidence.
+[schemas/review.schema.json](schemas/review.schema.json), the current accepted `storyboard.json`, and the plan
+view returned by `scripts/pgvideo review-input --request "<id>" --json`. Do not give the reviewer `plan.json`
+or `plan-report.md`: they contain the writer's claim assessments. The authored wording, selection, and outline
+in the review view are permitted inputs, not a self-review. Use `packet` for original sources and `excerpt`
+for additional pinned evidence. Obtain current digests and `review_targets` from `status` or `review-input`.
 
 Require exactly one finding for every review target. The reviewer must check both that each technical claim
 comes from the document or allowed glossary and that its evidence supports its meaning. Content outside those
 sources is a material finding even if a PostgreSQL source file supports it. Require an editorial `repetition`
 finding, with both scene IDs in its message, for every fact or definition that the video explains in full more
-than once. Report review separation truthfully.
+than once, except the question, main answer, and one supported closing takeaway allowed by rule 9.
+Require one `coverage` judgment for every eligible section with content, after reading all of them. For `full`,
+check every fact, example, and qualification against the video, including material absent from the plan.
+Other detail levels must preserve the selected scope and all qualifications needed by kept claims.
+Report review separation truthfully. The writer imports the review unchanged; only the isolated reviewer
+may correct it with `revise`, including syntax, schema, coverage, digest, and verdict corrections.
 
 ```sh
 scripts/pgvideo review --request "<id>" --file ".scratch/<id>/review.v1.json" --json
@@ -501,7 +518,11 @@ scripts/pgvideo review --request "<id>" --file ".scratch/<id>/review.v1.json" --
 Build only after pgvideo accepts the current plan, storyboard, and independent review. A reviewer saying
 "approved" does not itself pass the content gate.
 
-## 5. Repair only when a result requests it
+## 5. Revise after findings or required authoring checks
+
+Initial assembly, omission patches, pre-import repetition checks, and the writer's source/meaning checks
+authorize targeted revisions before an import. They do not require a failed result or consume an import repair
+round. After an import, use its findings and `next_actions`. Content and media findings also authorize repair.
 
 - Follow [prompts/repair.md](prompts/repair.md) for a plan, storyboard, or review that failed or needs review.
   Change only the items named in the findings and references that must change with them.
@@ -535,12 +556,17 @@ Build only after pgvideo accepts the current plan, storyboard, and independent r
 scripts/pgvideo build --request "<id>" --json
 ```
 
-Build narrates, measures duration, times, renders, validates, and delivers, reusing matching artifacts.
+Build narrates, measures duration, times, renders, validates, and prepares a package, reusing matching artifacts.
 If measured duration falls outside the target's ±15% tolerance, follow `next_actions`: one rewrite of optional
 detail is allowed with `script --duration-rewrite`, followed by a new independent review and another build.
 Make that duration revision with `revise`; the flag does not permit retyping the storyboard.
 Preserve mandatory content and the target. After that, report any remaining miss; pass `build --accept-duration`
 only when the user explicitly accepts the measured length. Do not spend another rewrite or invent padding.
+
+For a long video, shorten optional detail. For a short video, expand only from unused allowed document or
+glossary content; revise and import the plan first if needed, then use `script --duration-rewrite` so the
+recorded duration budget is spent. Never repeat explanations, stretch pauses, or change the fixed speech settings
+to fill time. If the available content cannot reach the target, report infeasibility rather than shortening again.
 
 ### Audio encoding
 
@@ -552,19 +578,25 @@ the request ID, and `runs/<id>/quality-report.json`. **Never** repair a loudness
 the AAC encoder can replace loud "s" sounds with noise that exceeds the true-peak limit, and more peak headroom
 does not remove that noise.
 
-After `build` returns `completed`:
+After `build` passes automated validation, the package is prepared under `runs/<id>/delivery/`; final delivery
+is still gated. Read [prompts/media-review.md](prompts/media-review.md) and
+[schemas/media-review.schema.json](schemas/media-review.schema.json). Use `status.media_review_input` for the
+exact video hash, storyboard digest, video path, and scene IDs.
 
-1. Inspect a few slides in `runs/<id>/render/slides/` and read the quality report. Report any limitation.
-2. Record only checks actually performed, using the appropriate kind:
+1. Inspect every rendered scene for readability, correctness, diagram meaning, and agreement with narration.
+2. Listen to all narration, checking technical pronunciation, clarity, pacing, and complete sentences.
+3. Play the finished MP4 from beginning to end with captions, checking synchronization, transitions, and ending.
+4. Write an honest media review in `.scratch/<id>/media/<video-sha256>/review.v1.json`. Each scene needs visual,
+   listening, and caption verdicts, plus the whole-video checks. Use `unavailable` for checks you could not perform;
+   unavailable or failed checks block delivery. Do not infer listening or playback from text or measurements.
+5. Import it with `scripts/pgvideo media-review --request "<id>" --file "<file>" --json`. A completed result publishes
+   the final package and returns its paths. `note` may record supplementary observations but cannot open this gate.
 
-   ```sh
-   scripts/pgvideo note --request "<id>" --kind visual --text "<what you inspected and found>" --json
-   ```
+For a failed media review, report its findings and follow `next_actions`. Repairs return to the earliest affected
+stage: patch content with `revise`, obtain a new independent content review, and build again; repair a rendering,
+timing, or narration cause through the supported stage commands, then revalidate and inspect the resulting MP4.
+Keep the recorded content/duration repair limits and stop conditions. Do not modify a failed verdict to pass.
 
-   Use `--kind listening` only if you actually listened to the audio. Do not infer a listening review from text.
-3. Return the delivered paths. `delivery.directory` in `runs/<id>/quality-report.json` names the folder that
-   holds them: MP4, transcript, captions, references, glossary report, content report, plan, and quality report.
-4. State outstanding limitations, including no listening review, an accepted duration miss, or minor findings.
-
-The request is complete only after a completed build and delivery of these paths. A plan, script, or draft MP4
-alone is not a completed video.
+Return the final delivered paths: MP4, transcript, captions, references, glossary report, content report, plan,
+media review, and quality report. State any accepted duration miss or minor findings. The request is complete
+only after `media-review` returns `completed` and these paths are delivered. A prepared package is unfinished.

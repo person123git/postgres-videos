@@ -30,12 +30,12 @@ ORCHESTRATION = "orchestration.json"
 LAST_RESULT = "last-result.json"
 # Exact bytes of the plan, storyboard, and review files the harness submitted and pgvideo accepted.
 AUTHORED = "authored"
-PROMPTS = ("prompts/plan.md", "prompts/draft.md", "prompts/review.md", "prompts/repair.md")
+PROMPTS = ("prompts/plan.md", "prompts/draft.md", "prompts/review.md", "prompts/repair.md", "prompts/media-review.md")
 SCHEMAS = ("schemas/plan.schema.json", "schemas/storyboard.schema.json", "schemas/review.schema.json",
-           "schemas/stage-result.schema.json")
+           "schemas/stage-result.schema.json", "schemas/media-review.schema.json")
 VERSION_LINE = re.compile(r"(?m)^<!-- instructions-version: (\d+) -->\s*$")
 # Bump when the review rules change; an accepted review under an older policy must be repeated.
-REVIEW_POLICY = 1
+REVIEW_POLICY = 2
 # Storyboard revisions allowed after a failed content review, and rewrites after a measured-duration miss.
 MAX_REPAIR_ROUNDS = 2
 # A plan repair stops when this many imports in a row have not passed, or this many judged imports in a row
@@ -46,7 +46,8 @@ MAX_SAME_BLOCKER = 3
 ISSUE_GROUP_LIMIT = 3
 ISSUE_EXAMPLES = 3
 ISSUE_SUBJECTS = ("scene", "narration", "target", "claim", "section")
-STAGE_REPORTS = {"plan": "plan-report.md", "script": "script.md", "content_review": "content-report.md"}
+STAGE_REPORTS = {"plan": "plan-report.md", "script": "script.md", "content_review": "content-report.md",
+                 "media_review": "media-review.json"}
 MAX_DURATION_REWRITES = 1
 DURATION_TOLERANCE = 0.15
 DEFAULT_AUDIENCE = "PostgreSQL users and administrators who know SQL"
@@ -254,8 +255,19 @@ def count_repair(root: Path, run_dir: Path, kind: str) -> int:
     record = load_record(run_dir)
     record.setdefault("repairs", {"storyboard": 0, "duration": 0})
     record["repairs"][kind] = record["repairs"].get(kind, 0) + 1
+    if kind == "duration":
+        record.pop("pending_duration_check", None)
     save_record(root, run_dir, record)
     return record["repairs"][kind]
+
+
+def remember_duration_miss(root: Path, run_dir: Path, manifest: dict) -> None:
+    """Preserve the measured miss when a needed plan/script revision invalidates narration."""
+    check = (manifest.get("narration") or {}).get("duration_check") or {}
+    if check.get("status") == "needs_review":
+        record = load_record(run_dir)
+        record["pending_duration_check"] = check
+        save_record(root, run_dir, record)
 
 
 def plan_repair_stopped(run_dir: Path) -> str | None:
@@ -359,7 +371,7 @@ def duration_check(run_dir: Path, seconds: float, storyboard_digest: str | None 
             and abs(accepted.get("measured_seconds", -1) - seconds) <= 0.5:
         return result | {"status": "accepted", "accepted_at": accepted["at"],
                          "message": message + " The user accepted this length."}
-    return result | {"status": "needs_review", "message": message}
+    return result | {"status": "needs_review", "direction": "short" if seconds < low else "long", "message": message}
 
 
 def require_duration(run_dir: Path, manifest: dict) -> None:
@@ -388,6 +400,7 @@ STAGE_FILES = {
     "narration": ("narration/audio-map.json", "narration/master.wav"),
     "timing": ("timeline.json", "captions.srt", "captions.vtt"), "render": ("render.json", "render/draft.mp4"),
     "validation": ("quality-report.json",),
+    "media_review": ("media-review.json",),
 }
 
 
@@ -398,7 +411,7 @@ def stage_artifacts(run_dir: Path, stage: str) -> list[dict]:
 def _issues(run_dir: Path, stage: str, record: dict) -> list[dict]:
     """Return a stage's blocking issues and warnings from its JSON record, when it keeps them."""
     names = {"document": "document.json", "glossary_check": "glossary-check.json", "plan": "plan.json",
-             "script": "storyboard.json", "content_review": "content-review.json"}
+             "script": "storyboard.json", "content_review": "content-review.json", "media_review": "media-review.json"}
     issues = []
     if record.get("error"):
         issues.append({"severity": "blocking", "code": "stage_failed", "message": record["error"]})
@@ -493,8 +506,9 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
                   f"accepted runs/{rid}/plan.json." if script is None else
                   f"Repair the blocking issues in runs/{rid}/script.md with prompts/repair.md: patch the storyboard "
                   f"into a new revision with `{tool} revise`, never retype it.")
+        duration_flag = " --duration-rewrite" if record.get("pending_duration_check") else ""
         return [{"action": "author", "phase": "draft",
-                 "command": f"{tool} script --request {rid} --storyboard <storyboard.json>", "reason": reason}]
+                 "command": f"{tool} script --request {rid} --storyboard <storyboard.json>{duration_flag}", "reason": reason}]
     review = manifest.get("content_review") or {}
     if review.get("status") != "passed":
         if review.get("status") == "needs_review":
@@ -510,20 +524,39 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
                  "command": f"{tool} review --request {rid} --file <review.json>",
                  "reason": "Review the storyboard in a separate context with prompts/review.md, without the writer's "
                            "self-assessment."}]
-    duration = (manifest.get("narration") or {}).get("duration_check") or {}
+    duration = (manifest.get("narration") or {}).get("duration_check") or record.get("pending_duration_check") or {}
     if duration.get("status") == "needs_review":
         used = (record.get("repairs") or {}).get("duration", 0)
         if used < MAX_DURATION_REWRITES:
             return [{"action": "author", "phase": "repair",
-                     "command": f"{tool} script --request {rid} --storyboard <shortened.json> --duration-rewrite",
-                     "reason": duration.get("message", "") + " Rewrite optional detail once, keep material caveats, "
-                               "review again, then build."}]
+                     "command": f"{tool} script --request {rid} --storyboard <revised.json> --duration-rewrite",
+                     "reason": duration.get("message", "") + (" Expand using unused allowed source content, revising "
+                               "the plan first if needed; report infeasibility if none remains." if
+                               duration.get("direction") == "short" else " Shorten optional detail, keeping material "
+                               "caveats.") + " Use one duration rewrite, review again, then build."}]
         return [{"action": "escalate", "reason": duration.get("message", "") + " The rewrite budget is used; the "
                  f"user may accept the length with {tool} build --request {rid} --accept-duration."}]
     validation = (manifest.get("validation") or {}).get("status")
-    if validation == "completed":
-        return [{"action": "deliver", "reason": "Report the delivered files and any outstanding limitations; "
-                 f"record a visual or listening check you actually made with {tool} note."}]
+    if validation in ("passed", "completed"):
+        media = manifest.get("media_review") or {}
+        if media.get("status") == "completed":
+            return [{"action": "deliver", "reason": "Report the reviewed video and delivered files, with any minor "
+                     "findings recorded in media-review.json."}]
+        if media.get("status") == "needs_review":
+            if media.get("unavailable_checks") or (record.get("repairs") or {}).get("storyboard", 0) >= MAX_REPAIR_ROUNDS:
+                return [{"action": "escalate", "reason": f"Finished-video inspection has unavailable checks or the "
+                         f"content repair budget is exhausted (runs/{rid}/media-review.json). Report the exact "
+                         "findings and missing capability; do not deliver the rejected build."}]
+            return [{"action": "author", "phase": "repair",
+                     "command": f"{tool} script --request {rid} --storyboard <revised.json>",
+                     "reason": f"Repair the finished-video findings in runs/{rid}/media-review.json. Content changes "
+                               "use revise and the remaining storyboard repair budget, then independent review and "
+                               "build. For a media-stage cause, fix that cause and repeat its dependent stages "
+                               "instead of importing unchanged content. Inspect the resulting MP4 again."}]
+        return [{"action": "author", "phase": "media_review",
+                 "command": f"{tool} media-review --request {rid} --file <media-review.json>",
+                 "reason": "Inspect every scene visually, listen to all narration, and check captions and complete "
+                           "MP4 playback with prompts/media-review.md before final delivery."}]
     if validation == "needs_review":
         return [{"action": "escalate", "reason": f"Media quality needs attention: runs/{rid}/quality-report.json."}]
     return [{"action": "run", "command": f"{tool} build --request {rid}",
@@ -592,6 +625,11 @@ def request_status(root: Path, run_dir: Path) -> dict:
             # Every target the separate review must judge, exactly once.
             storyboard = json.loads((run_dir / "storyboard.json").read_text(encoding="utf-8"))
             result["review_targets"] = list(targets(storyboard))
+        if (manifest.get("validation") or {}).get("status") in ("passed", "completed"):
+            result["media_review_input"] = {"video_sha256": (manifest.get("render") or {}).get("draft_sha256"),
+                "storyboard_digest": (manifest.get("script") or {}).get("digest"),
+                "video_path": str(run_dir / "render/draft.mp4"),
+                "scene_ids": [s["id"] for s in json.loads((run_dir / "storyboard.json").read_text())["scenes"]]}
     return result
 
 

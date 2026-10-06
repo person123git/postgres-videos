@@ -82,7 +82,9 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo plan --request <id> --file <plan.json>` | Imports and checks the harness's content plan. | no |
 | `scripts/pgvideo script --request <id> --storyboard <file>` | Imports and checks the harness's storyboard. Never starts narration. | no |
 | `scripts/pgvideo review --request <id> --file <review.json>` | Imports the separate semantic review and decides the content gate. | no |
-| `scripts/pgvideo build --request <id> [--no-reuse] [--accept-duration]` | Narrates, checks the measured length, times, renders, validates, and delivers an accepted storyboard, reusing matching media. | no |
+| `scripts/pgvideo review-input --request <id>` | Gives the independent reviewer the plan without writer assessments and lists current digests and review targets. | no |
+| `scripts/pgvideo build --request <id> [--no-reuse] [--accept-duration]` | Narrates, checks measured length, times, renders, and validates an accepted storyboard. Prepares files for final media review, reusing matching media. | no |
+| `scripts/pgvideo media-review --request <id> --file <review.json>` | Imports visual, listening, caption, and MP4 playback checks for the exact video; publishes the final package only when they pass. | no |
 | `scripts/pgvideo resume --request <id>` | Repeats the glossary cross-check with the request's `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review. | no |
 | `scripts/pgvideo replay --request <id> --from <other-id>` | Revalidates another request's accepted content for this request when the evidence, prompts, and review policy match. No new inference. | no |
 | `scripts/pgvideo excerpt --request <id> --path <file> --lines <a>-<b>` | Prints lines of a PostgreSQL file from the request's snapshot with their evidence ID. | no |
@@ -90,7 +92,9 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo packet --request <id> --omissions-template [--plan <file>]` | Prints a `revise` patch that omits, with empty reasons to fill in, every eligible section the plan leaves unaccounted. | no |
 | `scripts/pgvideo revise --from <file> --patch <patch> --out <new.json>` | Applies a small patch to a plan, storyboard, or review input file and writes a new revision. The source file is unchanged. | no |
 | `scripts/pgvideo baseline --request <id>` | Drafts the old extractive script for comparison. It is never narrated or delivered. | no |
-| `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records a visual or listening check that was actually performed on the delivered video. | no |
+| `scripts/pgvideo note --request <id> --kind visual\|listening --text "…"` | Records supplementary observations after validation; does not pass final media review. | no |
+
+`scripts/pgvideo test --pattern test_harness.py` runs a focused test file in the same project sandbox.
 | `scripts/pgvideo narrate`, `timing`, `render`, `validate --request <id>` | Repeat one media stage and the ones after it. The content gate applies. | no |
 | `scripts/pgvideo doctor [--sample]` | Checks the local environment and writes `.runtime/environment-report.json`. `--sample` also narrates, renders, and encodes a short offline sample. | no |
 | `scripts/pgvideo test` | Runs the test suite in the offline sandbox. | no |
@@ -102,7 +106,7 @@ command, and a failed check stops the command. `scripts/pgvideo <command> --help
 lists a command's options.
 
 The harness-facing commands (`prepare`, `status`, `plan`, `script`, `review`,
-`build`, `resume`, `replay`, `excerpt`, `packet`, `revise`, `baseline`, `note`) take `--json`. They
+`build`, `review-input`, `media-review`, `resume`, `replay`, `excerpt`, `packet`, `revise`, `baseline`, `note`) take `--json`. They
 then print one structured result on standard output, with `request_id`,
 `stage`, `status`, `artifacts`, `issues`, `next_actions`, and a `message`
 ([schemas/stage-result.schema.json](schemas/stage-result.schema.json)), and keep
@@ -140,7 +144,7 @@ The other commands' options:
 | `plan` | `--human-revision` | off | A person revised this plan after pgvideo stopped a repair that was not converging. |
 | `script` | `--storyboard` | none | The harness's version 2 scene file (JSON or YAML) inside the project. |
 | `script` | `--drafter-command` | none | An optional adapter: an executable inside the project that reads `draft-input.json` on standard input and writes the scene file on standard output, offline. |
-| `script` | `--duration-rewrite` | off | This storyboard shortens optional detail after the measured narration missed its target (one rewrite). |
+| `script` | `--duration-rewrite` | off | One rewrite after a measured duration miss: shorten optional detail when long or expand using unused allowed source content when short. |
 | `script` | `--human-revision` | off | A person revised this storyboard after the two automatic repair rounds were used. |
 | `build`, `script`, `resume` | `--no-reuse` | off | Build the narration and MP4 instead of reusing a validated video. |
 | `build` | `--accept-duration` | off | You accept a measured length outside the target. The harness passes it only when you say so. |
@@ -165,7 +169,8 @@ The other commands' options:
 ```text
 prepare: snapshot → parse → glossary match → cross-check → evidence packet
 harness: content plan → plan checks → storyboard → storyboard checks → separate review → content gate
-build:   Kokoro narration → measured-length check → timing → slides and MP4 → validation → delivery
+build:   Kokoro narration → measured-length check → timing → slides and MP4 → validation
+review:  every scene visually + all narration + captions + complete MP4 playback → delivery
 ```
 
 1. **Evidence.** `prepare` writes `runs/<id>/evidence-packet.json`: every section
@@ -186,15 +191,20 @@ build:   Kokoro narration → measured-length check → timing → slides and MP
    configuration facts against the snapshot, checks screens, code, tables, and
    edge direction, and estimates the length at the Kokoro rate measured on this
    machine. `script.md` shows the result; its checks are labeled lexical.
-4. **Review.** A separate pass judges every narration item, screen line, diagram
+4. **Review.** A separate pass uses `review-input` to avoid seeing the writer's claim assessments. It judges every narration item, screen heading and line, diagram
    edge, and hand-written TTS text as supported, contradicted, or lacking
    evidence, and adds editorial findings. pgvideo accepts the review only for the
    exact current storyboard and plan, writes `content-review.json` and
    `content-report.md`, and opens the content gate only when every factual target
-   is supported and nothing is material.
+   is supported and nothing is material. It also reviews diagram nodes, code/table excerpts and glossary cards,
+   and checks source-to-video coverage for every eligible section, including content missing from the plan.
 5. **Media.** `build`, and every media command, refuses without the gate. It
    narrates, compares the measured length with the target, and then times,
-   renders, validates, and delivers.
+   renders, and validates a prepared package under `runs/<id>/delivery/`.
+6. **Finished-video review.** Every scene requires actual visual, listening, and caption checks, followed by
+   complete MP4 playback for pacing, transitions, synchronization, and ending. `media-review` binds this report
+   to the exact MP4 hash and publishes the package only when every required check passes. Missing tools or
+   unavailable checks are reported and block delivery.
 
 Old requests, made before this workflow, keep their extractive provenance: they
 are not relabeled, and `resume`, `script`, and the media commands replay them
@@ -409,7 +419,7 @@ credentials; `--drafter-command` adapters run offline too. See
 | Location | Contents |
 | --- | --- |
 | `runs/<id>/` | One request: `request.json`, `orchestration.json`, its read-only inputs, `evidence-packet.json`, `plan.json`, `storyboard.json`, `content-review.json`, the exact files the harness submitted in `authored/`, every stage's record and report, `last-result.json`, audio, slides, and the draft MP4. It is kept after delivery so any stage can be repeated. |
-| `output/<id>/` | The delivery: `<page>.mp4` (`<page>-summary.mp4` or `<page>-full.mp4` for those levels), `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `glossary-check.md`, `content-report.md`, `plan.md`, `orchestration.json`, `quality-report.json`, and `manifest.json`. |
+| `output/<id>/` | The reviewed delivery: `<page>.mp4` (`<page>-summary.mp4` or `<page>-full.mp4` for those levels), `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `glossary-check.md`, `content-report.md`, `plan.md`, `media-review.json`, `orchestration.json`, `quality-report.json`, and `manifest.json`. |
 | `cache/` | Downloads and reusable results: source files by commit, narration units, validated videos in `cache/videos/`, and accepted harness content in `cache/content/`. |
 | `.runtime/` | The local Python runtime, FFmpeg, eSpeak NG, Chromium, temporary files, and `environment-report.json`. |
 | `AGENTS.md`, `prompts/`, `schemas/`, `docs/harness.md` | The harness runbook, its phase prompts, the versioned JSON Schemas, and its reference. |
@@ -890,21 +900,23 @@ the measured speech rate must fit the target. `script` never starts narration.
 that it names the current storyboard, plan, and evidence digests; that it
 declares a separate context and did not see the writer's context or
 self-assessment; and that it has exactly one finding for each narration item,
-line of a question, bullet, step, diagram, or image screen, diagram edge, and
+screen heading and line, diagram node and edge, code/table excerpt, glossary card, and
 hand-written TTS text (`status --json` lists them as `review_targets`). The gate
 passes when every factual finding is `supported` with resolvable evidence and no
 finding or editorial note is material; minor findings are delivered in
 `content-report.md`. After a failed review the harness may import two repaired
 storyboards, each reviewed again; the next needs `--human-revision`. The gate is
 checked by narration, media reuse, timing, rendering, and validation themselves,
-under review policy 1; a new policy requires a new review.
+under review policy 2; a new policy requires a new review. The reviewer receives the plan view from `review-input`,
+not `plan.json` or `plan-report.md`. It must judge coverage for every eligible section with content; full detail
+cannot omit sections or planned claims. Only the isolated reviewer may create or correct review verdicts.
 
 `build` compares the measured narration with the target. Outside ±15%, it stops
-for one `--duration-rewrite` of optional detail, and then only for your
+for one `--duration-rewrite`: shorten optional detail when long; expand from unused allowed content when short,
+revising the plan first if needed. If no allowed expansion remains, report infeasibility. Then only your
 `--accept-duration`, which stays valid while the same storyboard measures the
-same length. Validation delivers the content report, the plan report, and the
-orchestration record with the media, and the quality report records the content
-gate. `resume` and `replay` import the saved `authored/` files through the same
+same length. Validation prepares the reports and media; final publication requires `media-review` of every scene
+and complete MP4 playback. The quality report records both gates. `resume` and `replay` import the saved `authored/` files through the same
 checks, so resumed and replayed content is revalidated, not trusted.
 
 ### Narration script and storyboard
@@ -1053,7 +1065,9 @@ at 30 fps and AAC mono audio at 48 kHz. `render.json` records the input and
 artifact hashes, and `references.md` links to the resolved document and
 commit-specific citations. Validation fully decodes the draft, checks its
 streams, timing, caption coverage, spoken units, silence, and loudness, then
-copies the MP4 and accompanying files to `output/<request-id>/`. The run's
+prepares the MP4 and accompanying files under the run's `delivery/` directory. For harness requests,
+`media-review` publishes them to `output/<request-id>/` after actual inspection passes. Older extractive
+requests retain automatic delivery. The run's
 `quality-report.json` records the measurements and delivery hashes.
 
 The audio is encoded at 192 kb/s by default. At 128 kb/s the AAC encoder can

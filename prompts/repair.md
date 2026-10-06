@@ -1,6 +1,9 @@
 # Phase prompt: bounded repair
 
-Use this after pgvideo reports `failed` or `needs_review` for a plan, a storyboard, or its content review.
+Use this for targeted revisions after authoring self-checks, required pre-import checks, or pgvideo findings.
+Pre-import assembly and self-checks need no failed result. After import, follow findings and `next_actions`.
+Only the isolated reviewer may correct a review; the writer may relay deterministic errors and the current
+review contract but may not change review judgments or provide a self-assessment.
 
 Input: the findings in `runs/<request-id>/plan-report.md` or `script.md` (deterministic checks) or
 `content-report.md` (the separate review), the current file you imported (your latest revision in
@@ -16,7 +19,8 @@ syntax error. Check what was actually saved; a failed call does not prove that n
 
 1. Read the findings and locate affected entries. Read `scripts/pgvideo revise --help` before first use.
 2. Write a small JSON list of operations to `.scratch/<id>/fix1.json`. Follow
-   [AGENTS.md's write-size limits](../AGENTS.md#write-size-limits): stay within the **32k-token** output budget
+   [AGENTS.md's write-size limits](../AGENTS.md#write-size-limits): use the smaller of the **32k-token** ceiling
+   and the actual model/tool limit
    with headroom for the complete call, and honor any reduced limits recorded after a write failure.
 3. Run `jq empty .scratch/<id>/fix1.json`. Fix any syntax error in the patch before continuing.
 4. Apply it to your latest valid revision with a new output filename. `revise` preserves the source:
@@ -90,7 +94,9 @@ value. Examples: `claims[id=size-sets-slot].sources`, `claims[*].assessment.glos
 
 Budgets: a plan repair is stopped when three imports in a row report the same blocking issue, or ten in a row
 have not passed. A storyboard gets two repair rounds after a failed content review, and one rewrite after the
-measured narration missed its target (`--duration-rewrite`, which shortens optional detail only). Make duration
+measured narration missed its target (`--duration-rewrite`). Shorten optional detail when long; when short,
+expand using unused allowed source content and revise the plan first if needed. Report infeasibility if no
+allowed content remains. Keep fixed speech settings and avoid repeated explanations or pause padding. Make duration
 changes with `revise` too. If another repair is needed after a budget is exhausted, follow `next_actions` and
 stop. Report the remaining findings with the request ID; a person decides next. `--human-revision` is only for
 a revision a person made.

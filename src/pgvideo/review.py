@@ -36,8 +36,6 @@ SCHEMA_VERSION = 1
 RECORD = "content-review.json"
 REPORT = "content-report.md"
 SEVERITIES = ("blocking", "warning", "note")
-# Screens whose lines are the writer's own assertions; code, tables, and glossary cards are checked verbatim.
-ASSERTING_LAYOUTS = ("question", "bullets", "steps", "diagram", "image")
 REQUEST_FIELDS = ("request_id", "created_at", "producer", "authored")
 
 
@@ -56,9 +54,17 @@ def targets(storyboard: dict) -> dict[str, dict]:
                 found[f"tts:{item['id']}"] = {"scene": scene["id"], "kind": "tts", "text": item["text"],
                                               "tts": item["tts"]}
         screen = scene["screen"]
-        if screen["layout"] in ASSERTING_LAYOUTS:
-            for number, line in enumerate(screen["lines"], 1):
-                found[f"screen:{scene['id']}:{number}"] = {"scene": scene["id"], "kind": "screen", "text": line}
+        for number, line in enumerate([screen["heading"], *screen["lines"]]):
+            found[f"screen:{scene['id']}:{number}"] = {"scene": scene["id"], "kind": "screen", "text": line}
+        for number, node in enumerate((screen.get("diagram") or {}).get("nodes", []), 1):
+            found[f"node:{scene['id']}:{number}"] = {"scene": scene["id"], "kind": "node", "text": node["label"]}
+        for kind in ("code", "table"):
+            if content := screen.get(kind):
+                found[f"{kind}:{scene['id']}:1"] = {"scene": scene["id"], "kind": kind,
+                                                    "text": json.dumps(content, ensure_ascii=False)}
+        for number, term in enumerate(screen.get("terms", []), 1):
+            found[f"term:{scene['id']}:{number}"] = {"scene": scene["id"], "kind": "term",
+                                                     "text": f"{term['term']}: {term['definition']}"}
         for number, edge in enumerate((screen.get("diagram") or {}).get("edges", []), 1):
             labels = {node["id"]: node["label"] for node in screen["diagram"]["nodes"]}
             found[f"edge:{scene['id']}:{number}"] = {
@@ -66,6 +72,25 @@ def targets(storyboard: dict) -> dict[str, dict]:
                 "text": f"{labels.get(edge['from'])} {edge['label']} {labels.get(edge['to'])}",
                 "claims": edge.get("claims", [])}
     return found
+
+
+def review_input(run_dir: Path) -> dict:
+    """Return the review contract without the writer's claim assessments or tool verdicts."""
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    for stage in ("evidence", "plan", "script"):
+        if (manifest.get(stage) or {}).get("status") != "passed":
+            raise ValueError(f"The {stage} stage must pass before obtaining review input.")
+    plan = json.loads(_recorded(run_dir, "plan.json", manifest["plan"]))
+    keys = ("schema", "request_id", "audience", "detail", "target_minutes", "main_answer", "learning_objectives",
+            "outline", "required_caveats", "omissions")
+    safe = {key: plan[key] for key in keys}
+    claim_keys = ("id", "text", "kind", "sources", "glossary", "depends_on")
+    safe["claims"] = [{key: claim[key] for key in claim_keys if key in claim} for claim in plan["claims"]]
+    storyboard = json.loads(_recorded(run_dir, "storyboard.json", manifest["script"]))
+    return {"plan": safe, "storyboard_path": str(run_dir / "storyboard.json"),
+            "digests": {f"{name}_digest": manifest[stage]["digest"] for name, stage in
+                        (("evidence", "evidence"), ("plan", "plan"), ("storyboard", "script"))},
+            "review_targets": list(targets(storyboard))}
 
 
 def import_review(root: Path, run_dir: Path, path: Path) -> dict:
@@ -108,7 +133,7 @@ def _import(root: Path, run_dir: Path, path: Path) -> dict:
     if reviewer["writer_context_shared"] or reviewer["writer_self_assessment_seen"]:
         raise ValueError("The review shared the writer's context or saw its self-assessment. A drafting pass does "
                          "not count as its own review: review again in a fresh context with only the storyboard, the "
-                         "plan, and the evidence.")
+                         "plan view from `review-input`, and the evidence.")
     made_by = producer(root, raw["producer"], phase="review")
     record = _Gate(root, run_dir, raw, storyboard).build()
     record["reviewer"] = reviewer
@@ -186,8 +211,8 @@ class _Gate:
                 self.issue("note" if verdict == "supported" else "warning", "framing_is_factual",
                            "The writer labeled this sentence framing, but the review finds a technical claim in it.",
                            **where)
-            if info["kind"] in ("edge", "tts") and not finding["factual"]:
-                kind = "diagram edge" if info["kind"] == "edge" else "TTS"
+            if info["kind"] in ("edge", "tts", "code", "table", "term") and not finding["factual"]:
+                kind = "diagram edge" if info["kind"] == "edge" else info["kind"]
                 self.issue("blocking", "inconsistent_finding", f"A {kind} target is always judged against its "
                            "evidence.", **where)
             for issue in finding["issues"]:
@@ -199,6 +224,7 @@ class _Gate:
                 raise ValueError(f"An editorial finding names unknown scene {item['scene']}.")
             self.issue("blocking" if item["severity"] == "material" else "warning", f"editorial_{item['code']}",
                        item["message"], scene=item["scene"])
+        self._coverage()
         status = "needs_review" if any(i["severity"] == "blocking" for i in self.issues) else "passed"
         return {
             "schema": SCHEMA_VERSION,
@@ -216,9 +242,28 @@ class _Gate:
             "findings": [findings[target] | {"scene": self.targets[target]["scene"],
                                              "kind": self.targets[target]["kind"]} for target in self.targets],
             "editorial": self.raw["editorial"],
+            "coverage": self.raw["coverage"],
             "summary": self.raw["summary"],
             "issues": self.issues,
         }
+
+    def _coverage(self) -> None:
+        manifest = json.loads((self.run_dir / "manifest.json").read_text(encoding="utf-8"))
+        packet = json.loads(_recorded(self.run_dir, "evidence-packet.json", manifest["evidence"]))
+        sections = {s["id"] for s in packet["sections"] if s["eligible"] and s["blocks"]}
+        plan = json.loads((self.run_dir / "plan.json").read_text(encoding="utf-8"))
+        omitted = {s["section"] for s in plan["omissions"]}
+        seen = set()
+        for item in self.raw["coverage"]:
+            section = item["section"]
+            if section not in sections or section in seen:
+                raise ValueError(f"Coverage names an unknown or duplicate eligible section: {section}.")
+            seen.add(section)
+            if item["verdict"] == "missing_content" or (item["verdict"] == "allowed_omission" and
+                    (plan["detail"] == "full" or section not in omitted)):
+                self.issue("blocking", "missing_content", f"Section {section}: {item['justification']}")
+        if missing := sections - seen:
+            raise ValueError("The review leaves eligible sections unchecked: " + ", ".join(sorted(missing)))
 
 
 def _update_manifest(root: Path, run_dir: Path, *, status: str, record: dict | None = None, sha: str | None = None,
@@ -289,4 +334,6 @@ def _render(record: dict, storyboard: dict) -> str:
     if record["editorial"]:
         lines += ["", "## Editorial review", ""]
         lines += [f"- {e['severity']} `{e['code']}` ({e['scene']}): {e['message']}" for e in record["editorial"]]
+    lines += ["", "## Source-to-video coverage", ""]
+    lines += [f"- `{c['section']}`: **{c['verdict']}** — {c['justification']}" for c in record["coverage"]]
     return "\n".join(lines).rstrip() + "\n"

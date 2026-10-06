@@ -23,7 +23,7 @@ from pgvideo import cli, reuse
 from pgvideo import narration as narration_module
 from pgvideo import render as render_module
 from pgvideo.stages import STAGES, invalidate_after
-from harness_fixture import accept_content
+from harness_fixture import accept_content, authored, recorded_media_review, write
 from test_sources import DOCUMENT, GLOSSARY_TEXT, PIN, POSTGRES, PROJECT_ROOT, WIKI, WIKI_COMMIT, FakeGitHub, \
     install_project_files, postgres_files, wiki_files
 
@@ -203,7 +203,14 @@ class ReuseTests(unittest.TestCase):
         # The small fixture is far shorter than the default target; the test accepts its measured length.
         status, output, stderr = self.run_command("build", "--request", run_dir.name, "--accept-duration", *build)
         self.assertEqual(status, expect, stderr)
+        if status == 0:
+            self.inspect_media(run_dir)
         return run_dir, stdout + output
+
+    def inspect_media(self, run_dir):
+        path = write(authored(self.workspace, run_dir, "media-review.json"), recorded_media_review(run_dir))
+        status, _stdout, stderr = self.run_command("media-review", "--request", run_dir.name, "--file", str(path))
+        self.assertEqual(status, 0, stderr)
 
     @staticmethod
     def manifest(run_dir):
@@ -350,6 +357,7 @@ class ReuseTests(unittest.TestCase):
                     status, stdout, stderr = self.run_command(command, "--request", first.name, *extra)
                     self.assertEqual(status, 0, stderr)
                 self.assertIn(f"Reuse: request {first.name} has a validated video with the same inputs", stdout)
+                self.inspect_media(first)
                 manifest = self.manifest(first)
                 self.assertEqual((manifest["status"], manifest["render"]["reused_from"]), ("completed", first.name))
         self.assertEqual((len(self.kokoro.calls), self.slides.call_count), (calls, renders))

@@ -78,6 +78,9 @@ def recorded_content(root: Path, run_dir: Path) -> tuple[dict, dict]:
                            "assessment": {"source_support": "supported", "evidence": extra[:1],
                                           "justification": "Recorded: shown verbatim.", "glossary": "not_applicable"}})
             scene_claims.append(f"c{number:03d}")
+            if settings["detail"] == "full":
+                narration.append({"text": scene["title"], "origin": "paraphrase", "claims": [f"c{number:03d}"],
+                                  "sources": extra, "evidence": extra[:1]})
         screen = copy.deepcopy(scene["screen"])
         if screen.get("image"):
             screen["image"] = {"link": screen["image"]["link"]}
@@ -127,6 +130,9 @@ def recorded_review(root: Path, run_dir: Path, *, verdicts: dict | None = None) 
     """A review that judges every target supported by its scene's sources, except the given verdicts."""
     status = request_status(root, run_dir)
     storyboard = _load(run_dir / "storyboard.json")
+    packet = _load(run_dir / "evidence-packet.json")
+    plan = _load(run_dir / "plan.json")
+    omitted = {item["section"] for item in plan["omissions"]}
     scenes = {scene["id"]: scene for scene in storyboard["scenes"]}
     narration = {n["id"]: n for scene in storyboard["scenes"] for n in scene["narration"]}
     findings = []
@@ -146,7 +152,11 @@ def recorded_review(root: Path, run_dir: Path, *, verdicts: dict | None = None) 
             "reviewer": {"separation": "fresh_context", "writer_context_shared": False,
                          "writer_self_assessment_seen": False},
             "producer": PRODUCER | {"prompt": "prompts/review.md"},
-            "findings": findings, "editorial": [], "summary": "Recorded review of every target."}
+            "findings": findings, "editorial": [],
+            "coverage": [{"section": section["id"], "verdict": "allowed_omission" if section["id"] in omitted
+                          else "complete", "justification": "Recorded source-to-video coverage check."}
+                         for section in packet["sections"] if section["eligible"] and section["blocks"]],
+            "summary": "Recorded review of every target."}
 
 
 def accept_content(root: Path, run_dir: Path, *, plan_change=None, storyboard_change=None) -> dict:
@@ -171,3 +181,17 @@ def accept_content(root: Path, run_dir: Path, *, plan_change=None, storyboard_ch
     results["review"] = import_review(root, run_dir, write(authored(root, run_dir, "review.json"),
                                                            recorded_review(root, run_dir)))
     return results
+
+
+def recorded_media_review(run_dir: Path) -> dict:
+    """Recorded inspection declarations for gate tests, independent of audiovisual quality assessment."""
+    manifest = _load(run_dir / "manifest.json")
+    storyboard = _load(run_dir / "storyboard.json")
+    return {"schema": "pgvideo/media-review/v1", "request_id": run_dir.name,
+            "video_sha256": manifest["render"]["draft_sha256"], "storyboard_digest": manifest["script"]["digest"],
+            "producer": PRODUCER | {"prompt": "prompts/media-review.md"},
+            "scenes": [{"scene": s["id"], "visual": "passed", "listening": "passed", "captions": "passed",
+                        "message": "Recorded inspection fixture."} for s in storyboard["scenes"]],
+            "checks": {kind: {"verdict": "passed", "message": "Recorded inspection fixture."}
+                       for kind in ("playback", "transitions", "pacing", "ending", "caption_sync")},
+            "summary": "Recorded review for deterministic gate tests."}
