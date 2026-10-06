@@ -3,7 +3,8 @@
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
 video request. For other tasks, do the requested work without starting a video.
 
-For all repository work, use the temporary-file convention below.
+For all repository work, keep your working files in `.scratch/`, one subdirectory per task or request, as
+[Project layout](#project-layout) describes.
 
 ## Read this first
 
@@ -42,8 +43,9 @@ duration meets it.
    version-scoped. Check glossary consistency separately from evidence support. Use a glossary definition in
    narration only when it applies to the document's PostgreSQL version and agrees with the document.
 6. **Keep the request fixed.** Preserve the user's document, detail, audience, duration, language, voice, speed,
-   and other explicit constraints through every revision. Never fill a duration gap with new material. If the
-   allowed content cannot meet the requested scope and duration, report an infeasible plan.
+   and other explicit constraints through every revision. Never fill a duration gap with content that is not in
+   the document or the glossary. If the allowed content cannot meet the requested scope and duration, report an
+   infeasible plan.
 7. **Continue automatically when permitted.** A video request authorizes the normal local workflow. Do not ask
    for routine approval between stages. Ask only for blocking information or a required decision; respect
    environment permission prompts.
@@ -68,11 +70,14 @@ own copy into its run directory when it starts, so a video is made from the wiki
 
 - Read the document and `glossary.md` from `runs/<id>/wiki_content/`. When the user names a remote path
   (`wiki/vNN/...`) or a blob URL, read the file that path was downloaded to.
-- Download once, at the start of the request. A request that already has `runs/<id>/wiki_content/` keeps it:
-  do not download again, so the document does not change under a plan or a storyboard.
-- A page's front matter gives its PostgreSQL `version`, its `pinned_commit`, and whether it is `verified`.
+- Download once, at the start of the request. A request whose `runs/<id>/wiki_content/` holds `glossary.md` and
+  the document keeps that copy: do not download again, so the document does not change under a plan or a
+  storyboard. A copy without them is a failed download: download again.
+- A page's front matter gives its PostgreSQL `version`, which you record as `document.version` in the plan and
+  the storyboard; its `pinned_commit`, the PostgreSQL commit that its citations point to; and whether it is
+  `verified`.
 - A page cites PostgreSQL source files with links under `raw/postgres-NN/`. Those files are not in the wiki
-  repository.
+  repository, so the download does not include them.
 - Editing `runs/<id>/wiki_content/` does not change the wiki. Wiki changes, including glossary corrections, are
   committed to the remote repository.
 
@@ -113,14 +118,16 @@ To continue a request, look at what exists:
 
 | Found | Continue with |
 | --- | --- |
-| No `runs/<id>/wiki_content/` | [Downloading the wiki](#1-download-the-wiki). |
+| No `glossary.md` or no document in `runs/<id>/wiki_content/` | [Downloading the wiki](#1-download-the-wiki). |
 | The wiki, no `plan.json` | [Reading the document](#2-read-and-understand-the-document). |
 | `plan.json`, no `storyboard.json` | Read the document again, then [write the storyboard](#4-write-the-storyboard) from the plan. |
 | `storyboard.json`, no video in `output/<id>/` | [Build](#5-build-and-deliver). |
 | A video in `output/<id>/` | Report the delivered paths, or apply the change the user asks for and build again. |
 
 A plan or a storyboard locates content; it does not replace the document. Read the document again before you
-write or change anything from it.
+write or change anything from it. If you had to download the wiki again for a request that already has a plan or
+a storyboard, the page may have changed since they were written: read it again and correct them against it
+before you build.
 
 `jq empty <file>` tells you whether a file is valid JSON. Other notes and drafts for a task also go in
 `.scratch/<id>/`.
@@ -135,8 +142,8 @@ write or change anything from it.
   install packages into `.venv/` yourself; `scripts/setup` owns it.
 - In `runs/<id>/`, only `wiki_content/` is yours. pgvideo owns the rest of `runs/` and all of `output/`. Read
   them; never edit them.
-- pgvideo never calls a model and never uses the network to build a video. Downloading the wiki is the one step
-  that needs the network, and you do it.
+- pgvideo never calls a language model and never uses the network to build a video; Kokoro runs locally.
+  Downloading the wiki is the one step that needs the network, and you do it.
 
 Setup and the build options are described in [README.md](README.md).
 
@@ -160,8 +167,8 @@ copy of the page.
 
 Read the document's front matter, then every section from the first to the last and in full. Contents lists,
 navigation, reference lists, and notes about how the page was written are not content for the video; read them,
-and narrate none of them. Do not select content or write any part of the plan during this pass. The pass is complete only when you can state all of the following from the
-document alone:
+and narrate none of them. Do not select content or write any part of the plan during this pass. The pass is
+complete only when you can state all of the following from the document alone:
 
 - the question the page answers, and its answer;
 - what each section adds to that answer, and which earlier sections it builds on;
@@ -170,9 +177,10 @@ document alone:
   states it.
 
 If you cannot state one of them, read the sections involved again, with the glossary entries for their terms.
-These explain the page; they add no content (rule 3). If a passage still has more than one reading, or
-contradicts another passage, stop and report it as a source decision: its section and lines, the readings you
-see, and what a person must decide. Do not guess, and do not omit a section because you did not understand it.
+The entries help you understand the page; what you state must still come from the document. If a passage still
+has more than one reading, or contradicts another passage, stop and report it as a source decision: its section
+and lines, the readings you see, and what a person must decide. Do not guess, and do not omit a section because
+you did not understand it.
 
 ## 3. Write the plan
 
@@ -181,14 +189,16 @@ passes, after the understanding pass:
 
 1. **Selection pass.** Choose the home of every fact repeated across sections (rule 8), then select content.
    Only the home's claim explains a fact in full.
-2. **Evidence pass.** For every claim and caveat you keep, read the glossary entries for the terms it uses, and
-   the PostgreSQL files it cites when you have them, and assess the claim against them.
+2. **Evidence pass.** For every claim and caveat you keep, read the glossary entries for the terms it uses
+   (rule 5). When you have the PostgreSQL files it cites, read them and assess the claim against them. The
+   download does not include those files, so you normally do not have them: then write no `assessment` for the
+   claim. A file you could not read is not `insufficient_evidence`.
 
-Write the main answer, learning objectives, ordered outline, time budgets, claims with their sources and
-assessments, required caveats, and reasons for omitted sections. Record the request's document, audience,
-detail, and duration unchanged. The page's question and its own summary section are never omitted. If the source
-material cannot satisfy the required scope and duration, set `feasibility.status` to `infeasible` with the
-reason, then stop and report it. Do not change the duration or remove necessary qualifications.
+Write the main answer, learning objectives, ordered outline, time budgets, claims with their sources and the
+assessments you made, required caveats, and reasons for omitted sections. Record the request's document,
+audience, detail, and duration unchanged. If the source material cannot satisfy the required scope and duration,
+set `feasibility.status` to `infeasible` with the reason, then stop and report it. Do not change the duration or
+remove necessary qualifications.
 
 Save the plan as `.scratch/<id>/plan.json`.
 
@@ -219,7 +229,7 @@ Build narrates, times, renders, checks the media, and delivers the files. Read t
 | Result | Meaning |
 | --- | --- |
 | `completed` (exit 0) | The video is delivered. `delivery` lists the files; `duration_seconds` is the measured length. |
-| `needs_review` (exit 3) | Narration or rendering cannot handle something. `issues` names it: text Kokoro cannot say, a diagram edge without its node, a slide image that is missing, or a media measurement outside its limits. |
+| `needs_review` (exit 3) | Narration or rendering cannot handle something; `stage` says where. At `storyboard`, a blocking entry in `issues` names it: text Kokoro cannot say, a diagram edge without its node, or a slide image that is missing. At `validation`, a media measurement is outside its limits: `message` names it, and `runs/<id>/quality-report.json` has the values. A warning in `issues` never stops a build. |
 | `failed` (exit 1) | An error. Read the message: a malformed storyboard names the schema rule it breaks; a slide that overflows names its scene. |
 
 After you change the storyboard, run the same command again. Sentences that did not change reuse their audio.
