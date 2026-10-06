@@ -56,6 +56,10 @@ duration meets it.
    once, where it is first needed. This applies at every detail level: `full` means every fact and
    qualification is taught, not that every section's wording is narrated. The question, the main answer, and
    one closing takeaway are exempt.
+9. **Put new pronunciations in the dictionary.** When Kokoro says a term wrong or cannot say it, add the term's
+   spoken form to `pronunciation/en.yaml`, so that later videos use it too. The file's header explains its
+   sections. Do not correct a term only in one storyboard: a sentence's manual `tts` is for a reading that is
+   right in that sentence alone.
 
 ## The wiki: downloaded into `runs/<id>/wiki_content/`
 
@@ -237,6 +241,7 @@ Build narrates, times, renders, checks the media, and delivers the files. Read t
 | `failed` (exit 1) | An error. Read the message: a malformed storyboard names the schema rule it breaks; a slide that overflows names its scene. |
 
 After you change the storyboard, run the same command again. Sentences that did not change reuse their audio.
+After you change `pronunciation/en.yaml` (rule 9), the same command synthesizes every sentence again.
 
 Compare `duration_seconds` with the requested duration. For a long video, shorten optional detail. For a short
 video, expand only from unused document or glossary content, in the plan first. Preserve mandatory content and

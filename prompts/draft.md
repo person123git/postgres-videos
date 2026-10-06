@@ -34,9 +34,10 @@ from:
 - `framing`: an introduction, transition, or closing with no technical claim.
 
 Give every item that is not framing its `sources`: the section headings or line ranges of the page that state
-it. Leave `tts` out: pgvideo derives speech from `pronunciation/en.yaml`. Write `tts` with
-`tts_source: "manual"` only when the dictionary cannot say something; it must not contain backticks,
-underscores, or other symbols.
+it. Leave `tts` out: pgvideo derives speech from `pronunciation/en.yaml`. When a term is said wrong or cannot
+be said, add it to that file ([AGENTS.md](../AGENTS.md#rules-that-apply-at-every-stage) rule 9). Write `tts`
+with `tts_source: "manual"` only for a reading that is right in that sentence alone; it must not contain
+backticks, underscores, or other symbols.
 
 ## Screens
 

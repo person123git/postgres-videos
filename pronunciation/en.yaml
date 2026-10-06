@@ -72,12 +72,22 @@ terms:
   contrib: con-trib
   sysv: sys V
   pgstat: P G stat
+  pgstatindex: P G stat index
   walsender: wall sender
   walreceiver: wall receiver
   autovacuum: auto-vacuum
   bgwriter: B G writer
   multixact: multi-ex-act
   shmem: shared mem
+  fillfactor: fill factor
+  metapage: meta page
+  relcache: rel cache
+  indisvalid: ind is valid
+  indisready: ind is ready
+  indislive: ind is live
+  PROC_IN_SAFE_IC: proc in safe I C
+  # A two-letter capital word inside a code span is spelled; this keeps `IS NULL` as words.
+  IS: is
 
 parts:
   pg: P G
@@ -96,6 +106,7 @@ parts:
   mb: M B
   shmem: shared mem
   cmd: command
+  avg: average
   str: string
   buf: buffer
   bufs: buffers
@@ -115,6 +126,7 @@ parts:
   st: S T
   io: I O
   aio: A I O
+  cpu: C P U
   spi: S P I
   mvcc: M V C C
   slru: S L R U
@@ -147,6 +159,8 @@ parts:
   blks: blocks
   dat: dat
   sgml: S G M L
+  ccnew: C C new
+  ccold: C C old
 
 abbreviations:
   e.g.: for example
