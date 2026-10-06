@@ -1,4 +1,4 @@
-<!-- instructions-version: 11 -->
+<!-- instructions-version: 12 -->
 # AGENTS.md: pgvideo workflow
 
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
@@ -19,7 +19,7 @@ For all repository work, use the temporary-file convention below.
    imports of that stage. Stop and report the issue, request ID, report path, and what you tried when the same
    blocking issue survives two fixes, when an issue you already fixed returns, or when you have no fix left
    that you have not already tried. pgvideo enforces this for plans; see
-   [repair](#5-repair-only-when-a-result-requests-it).
+   [repair](#5-revise-after-findings-or-required-authoring-checks).
 
 Splitting a complete replacement across calls does not make it an allowed repair. Do not regenerate an
 existing input with Python.
@@ -124,15 +124,17 @@ directory per PostgreSQL version), but they play different roles.
 - Store editable video inputs there, for example `.scratch/<id>/plan.v1.json`. Only the first draft (`.v1`) is
   written by you. Every later revision, such as `plan.v2.json`, is the `--out` of `scripts/pgvideo revise`;
   syntax-only recovery copies a broken draft on disk instead.
-- Each new storyboard digest gets its own independent review draft, for example
-  `.scratch/<id>/reviews/<storyboard-digest>/review.v1.json`. A new review of changed content is a first draft;
-  corrections to that review use `revise`. Only the isolated reviewer may create or change its judgments.
+- Each storyboard digest gets its own independent review, kept in `.scratch/<id>/reviews/<storyboard-digest>/`
+  with the reviewer's own notes. Its first revision, `review.v1.json`, is the `--out` of `revise` applied to
+  the template that `review-input` writes; corrections to that review use `revise` too. Only the isolated
+  reviewer may create or change its judgments.
 - Let pgvideo manage its runtime temporary files through `scripts/pgvideo`; the wrapper configures
   `.runtime/tmp/`. The `.scratch/` recommendation applies to files you create while working on the project.
 
 ## Execution and recovery
 
-- Search with `rg` before reading files.
+- Search with `rg` to locate something in code or in a large artifact. What a phase tells you to read, read
+  in full and in order; a search finds a place, it does not show the whole.
 - Read the complete `status`, `issues`, and `next_actions` before continuing; a shortened preview is not a
   substitute for the required result checks.
 - Use [the file-writing and recovery rules](#mandatory-file-writing-and-recovery) after any failed write
@@ -142,6 +144,7 @@ directory per PostgreSQL version), but they play different roles.
   next step; perform it with a tool call in the same turn.
 - Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
   Read each phase's required instructions before acting; do not preemptively load every referenced file.
+  Everything a phase prompt lists as its reading is required.
 - Read all required source material, including eligible sections, caveats, corrections, resolutions, and the
   evidence of kept content.
 - After compaction or interruption, identify the video request and run `status` before other workflow
@@ -161,6 +164,7 @@ a schema rejection or `needs_review` result does **not** mean the JSON syntax is
 | --- | --- |
 | A write just failed or was cut off | Do failed-write recovery first, then classify the saved file again. |
 | No draft exists yet | Create the first draft. |
+| A review of a storyboard digest that has none yet | Run `review-input` and patch its template with `revise`. |
 | First draft is still being assembled | Append the next chunk at the confirmed saved position; validate when complete. |
 | A complete draft parses as JSON | Write a small patch and run `scripts/pgvideo revise`. |
 | Latest draft is invalid; an earlier valid revision exists | Use that valid revision as `--from`; patch the needed changes. |
@@ -242,8 +246,9 @@ Use this exception only when `jq empty` fails and there is no earlier valid inpu
 - Read the prompt and schema for a phase before writing its input. Use the schema's exact field names and
   allowed values. Copy request IDs, digests, and document unit IDs from current tool results; do not invent them
   or producer metadata.
-- pgvideo owns `plan.json`, `storyboard.json`, `content-review.json`, `manifest.json`, `inputs/`, and `authored/`
-  under the request directory. Keep your editable input files in `.scratch/<id>/` and import them.
+- pgvideo owns `plan.json`, `storyboard.json`, `content-review.json`, `manifest.json`, `inputs/`, `authored/`,
+  `review-input/`, `reviews/`, and `preview/` under the request directory. Keep your editable input files in
+  `.scratch/<id>/` and import them.
 - Pass `--json` to the workflow commands below. Replace placeholders such as `<id>` and `<file>` with real
   values. Append only user-requested options to `prepare`; omit other options to use its documented defaults.
 
@@ -427,26 +432,48 @@ but it must not receive the writer's conversation, reasoning, notes, or self-ass
 the writer's context does not meet this requirement. If no separate context is available, stop before building.
 The reviewer must not read the writer's task notes.
 
-Give the reviewer these instructions, [prompts/review.md](prompts/review.md),
-[schemas/review.schema.json](schemas/review.schema.json), the current accepted `storyboard.json`, and the plan
-view returned by `scripts/pgvideo review-input --request "<id>" --json`. Do not give the reviewer `plan.json`
-or `plan-report.md`: they contain the writer's claim assessments. The authored wording, selection, and outline
-in the review view are permitted inputs, not a self-review. Use `packet` for original sources and `excerpt`
-for additional pinned evidence. Obtain current digests and `review_targets` from `status` or `review-input`.
+First render the screens, so that the reviewer judges what the viewer will see:
 
-Require exactly one finding for every review target. The reviewer must check both that each technical claim
-comes from the document or allowed glossary and that its evidence supports its meaning. Content outside those
-sources is a material finding even if a PostgreSQL source file supports it. Require an editorial `repetition`
-finding, with both scene IDs in its message, for every fact or definition that the video explains in full more
-than once, except the question, main answer, and one supported closing takeaway allowed by rule 9.
-Require one `coverage` judgment for every eligible section with content, after reading all of them. For `full`,
-check every fact, example, and qualification against the video, including material absent from the plan.
-Other detail levels must preserve the selected scope and all qualifications needed by kept claims.
+```sh
+scripts/pgvideo preview --request "<id>" --json
+```
+
+Give the reviewer these instructions, [prompts/review.md](prompts/review.md), and
+[schemas/review.schema.json](schemas/review.schema.json). The reviewer runs
+`scripts/pgvideo review-input --request "<id>" --json`, which writes its inputs under `runs/<id>/review-input/`:
+the video as text in playback order, the page as text, source-to-video coverage, the warnings that pgvideo's
+checks leave open, the plan without the writer's claim assessments, and a review template. Do not give the
+reviewer `runs/<id>/plan.json` or `plan-report.md`: they contain the writer's claim assessments. The authored
+wording, selection, and outline in the plan view are permitted inputs, not a self-review. The reviewer uses
+`packet` for original sources and `excerpt` for additional pinned evidence.
+
+The review has two passes. The first is never skipped, shortened, or divided:
+
+1. **The whole video.** The reviewer reads the complete video and the page in order, then sets every `overall`
+   check, the editorial findings, and one `coverage` judgment for every eligible section with content. Require
+   an editorial `repetition` finding that names both scenes for every fact or definition that the video explains
+   in full more than once, except the question, main answer, and one supported closing takeaway allowed by
+   rule 9. For `full`, every fact, example, and qualification is checked against the video, including material
+   absent from the plan. Other detail levels must preserve the selected scope and all qualifications needed by
+   kept claims.
+2. **Every target.** Exactly one finding for every review target. The reviewer checks both that each technical
+   claim comes from the document or allowed glossary and that its evidence supports its meaning. Content outside
+   those sources is a material finding even if a PostgreSQL source file supports it.
+
+The reviewer fills the template with `revise` patches; pgvideo refuses a file that still holds a `pending`
+value. When an earlier storyboard of the request was reviewed, the template carries the findings of the targets
+whose text, claims, and evidence did not change. Only the second pass shrinks: the whole-video pass is done
+again on the complete new video.
+
+When the second pass is too large for one context, give consecutive scene ranges to several isolated reviewers;
+each applies its patches to the latest revision. One reviewer still does the first pass for the whole video.
+Never merge, complete, or correct findings yourself.
+
 Report review separation truthfully. The writer imports the review unchanged; only the isolated reviewer
 may correct it with `revise`, including syntax, schema, coverage, digest, and verdict corrections.
 
 ```sh
-scripts/pgvideo review --request "<id>" --file ".scratch/<id>/review.v1.json" --json
+scripts/pgvideo review --request "<id>" --file ".scratch/<id>/reviews/<storyboard-digest>/review.v1.json" --json
 ```
 
 Build only after pgvideo accepts the current plan, storyboard, and independent review. A reviewer saying
@@ -469,7 +496,9 @@ round. After an import, use its findings and `next_actions`. Content and media f
   The template never omits the question or summary; it lists them under `essential`. `essential_omitted`
   means: cite one of that section's unit IDs in a claim, and remove the section from `omissions` if it is there.
 - Import the revision as a new input file. Revalidate dependent stages; every changed storyboard needs a new
-  independent review. If a fix requires a different plan, revise and import the plan first.
+  independent review. Run `preview` again first. The review starts from the template that `review-input`
+  writes, which carries the findings of unchanged targets; its whole-video pass is done again. If a fix
+  requires a different plan, revise and import the plan first.
 - Allow at most two storyboard repair rounds after a failed content review. Use the budget recorded in `status`
   and `next_actions`; never reset it or label your own work `--human-revision`.
 - A plan repair that does not converge is stopped. pgvideo ends it when three imports in a row report the same
@@ -515,7 +544,10 @@ the Opus encoder adds more to the narration master's true peak (about 0.1 dB at 
 After `build` passes automated validation, the package is prepared under `runs/<id>/delivery/`; final delivery
 is still gated. Read [prompts/media-review.md](prompts/media-review.md) and
 [schemas/media-review.schema.json](schemas/media-review.schema.json). Use `status.media_review_input` for the
-exact video hash, storyboard digest, video path, and scene IDs.
+exact video hash, storyboard digest, video path, and scene IDs, and for where the rendered slides, the
+timeline with each scene's start and end, the captions, and the transcript are. Run
+`scripts/pgvideo preview --request "<id>" --json` to lay the rendered slides out as contact sheets; look
+through them first for the video as a whole.
 
 1. Inspect every rendered scene for readability, correctness, diagram meaning, and agreement with narration.
 2. Listen to all narration, checking technical pronunciation, clarity, pacing, and complete sentences.

@@ -429,6 +429,83 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual((manifest["status"], manifest["reuse"]["registered"]), ("completed", False))
         self.assertEqual(list(outside.iterdir()), [])
 
+    def test_preview_shows_the_slides_before_the_content_gate_and_the_rendered_ones_after(self):
+        from harness_fixture import recorded_content, recorded_review
+        from pgvideo.orchestration import require_content_gate
+        from pgvideo.planning import import_plan
+        from pgvideo.review import import_review
+        from pgvideo.script import create_script
+
+        def command(*argv):
+            status, stdout, stderr = self.run_command(*argv, "--json")
+            self.assertEqual(status, 0, stderr + stdout)
+            return json.loads(stdout)
+
+        status, stdout, _stderr = self.run_command("prepare", "--document", DOCUMENT, "--width", "640",
+                                                   "--height", "360")
+        run_dir = Path(next(line for line in stdout.splitlines() if line.startswith("Validated request: "))
+                       .removeprefix("Validated request: ")).parent
+        plan, storyboard = recorded_content(self.workspace, run_dir)
+        storyboard["plan_digest"] = import_plan(
+            self.workspace, run_dir, write(authored(self.workspace, run_dir, "plan.json"), plan))["digest"]
+        create_script(self.workspace, run_dir, storyboard=write(authored(self.workspace, run_dir, "story.json"),
+                                                                storyboard))
+        scenes = [scene["id"] for scene in self.load(run_dir, "storyboard.json")["scenes"]]
+
+        # Before any review: the slides are rendered from the accepted storyboard, and nothing else is produced.
+        shown = command("preview", "--request", run_dir.name)["preview"]
+        record = self.load(run_dir, "preview/preview.json")
+        self.assertEqual((shown["source"], record["source"]), ("storyboard", "storyboard"))
+        self.assertEqual([slide["scene"] for slide in record["slides"]], scenes)
+        self.assertEqual([scene for sheet in record["sheets"] for scene in sheet["scenes"]], scenes)
+        for item in (*record["slides"], *record["sheets"]):
+            self.assertEqual((run_dir / item["file"]).read_bytes()[:8], b"\x89PNG\r\n\x1a\n", item["file"])
+        self.assertEqual(shown["sheets"], [str(run_dir / sheet["file"]) for sheet in record["sheets"]])
+        self.assertFalse((run_dir / "render").exists())
+        with self.assertRaisesRegex(ValueError, "semantic content review has status 'None'"):
+            require_content_gate(run_dir, self.manifest(run_dir))
+        self.assertEqual(command("review-input", "--request", run_dir.name)["review_input"]["preview"], shown)
+        # A long video takes several sheets; together they show every slide once, in order.
+        with patch("pgvideo.preview.PER_SHEET", 3):
+            command("preview", "--request", run_dir.name)
+        paged = self.load(run_dir, "preview/preview.json")["sheets"]
+        self.assertEqual(len(paged), -(-len(scenes) // 3))
+        self.assertEqual([scene for sheet in paged for scene in sheet["scenes"]], scenes)
+        self.assertEqual([(sheet["first"], sheet["last"]) for sheet in paged][:2], [(1, 3), (4, 6)])
+        self.assertEqual(sorted(path.name for path in (run_dir / "preview/sheets").glob("*.png")),
+                         [Path(sheet["file"]).name for sheet in paged])
+        shown = command("preview", "--request", run_dir.name)["preview"]
+
+        # After the build: status says where the reviewer's inputs are, and the sheets show the rendered slides.
+        import_review(self.workspace, run_dir, write(authored(self.workspace, run_dir, "review.json"),
+                                                     recorded_review(self.workspace, run_dir)))
+        status, _stdout, stderr = self.run_command("build", "--request", run_dir.name, "--accept-duration")
+        self.assertEqual(status, 0, stderr)
+        inputs = command("status", "--request", run_dir.name)["media_review_input"]
+        for key in ("video_path", "slides_directory", "render_record", "timeline", "transcript", "quality_report",
+                    *range(len(inputs["captions"]))):
+            self.assertTrue(Path(inputs["captions"][key] if isinstance(key, int) else inputs[key]).exists(), key)
+        # Sheets of preview slides are not offered as the rendered video's.
+        self.assertIsNone(inputs["contact_sheets"])
+        self.assertEqual(command("preview", "--request", run_dir.name)["preview"]["source"], "render")
+        record = self.load(run_dir, "preview/preview.json")
+        rendered = self.load(run_dir, "render.json")
+        self.assertEqual(record["video_sha256"], rendered["sha256"])
+        self.assertEqual([slide["file"] for slide in record["slides"]], [slide["file"] for slide in rendered["slides"]])
+        sheets = command("status", "--request", run_dir.name)["media_review_input"]["contact_sheets"]
+        self.assertEqual(sheets, [str(run_dir / sheet["file"]) for sheet in record["sheets"]])
+        self.assertTrue(all(Path(sheet).is_file() for sheet in sheets))
+
+        # A preview of another storyboard is not offered for the current one.
+        storyboard["scenes"][0]["narration"][0]["text"] += " Again."
+        create_script(self.workspace, run_dir, storyboard=write(authored(self.workspace, run_dir, "story2.json"),
+                                                                storyboard))
+        self.assertIsNone(command("review-input", "--request", run_dir.name)["review_input"]["preview"])
+
+    @staticmethod
+    def load(run_dir: Path, name: str) -> dict:
+        return json.loads((run_dir / name).read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

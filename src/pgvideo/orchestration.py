@@ -35,7 +35,7 @@ SCHEMAS = ("schemas/plan.schema.json", "schemas/storyboard.schema.json", "schema
            "schemas/stage-result.schema.json", "schemas/media-review.schema.json")
 VERSION_LINE = re.compile(r"(?m)^<!-- instructions-version: (\d+) -->\s*$")
 # Bump when the review rules change; an accepted review under an older policy must be repeated.
-REVIEW_POLICY = 2
+REVIEW_POLICY = 3
 # Storyboard revisions allowed after a failed content review, and rewrites after a measured-duration miss.
 MAX_REPAIR_ROUNDS = 2
 # A plan repair stops when this many imports in a row have not passed, or this many judged imports in a row
@@ -401,6 +401,8 @@ STAGE_FILES = {
     "timing": ("timeline.json", "captions.srt", "captions.vtt"), "render": ("render.json", "render/draft.mp4"),
     "validation": ("quality-report.json",),
     "media_review": ("media-review.json",),
+    "review_input": ("review-input/index.json",),
+    "preview": ("preview/preview.json",),
 }
 
 
@@ -523,7 +525,8 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
         return [{"action": "author", "phase": "review",
                  "command": f"{tool} review --request {rid} --file <review.json>",
                  "reason": "Review the storyboard in a separate context with prompts/review.md, without the writer's "
-                           "self-assessment."}]
+                           f"self-assessment. The reviewer starts with `{tool} review-input --request {rid}`; run "
+                           f"`{tool} preview --request {rid}` first so that it can look at the slides."}]
     duration = (manifest.get("narration") or {}).get("duration_check") or record.get("pending_duration_check") or {}
     if duration.get("status") == "needs_review":
         used = (record.get("repairs") or {}).get("duration", 0)
@@ -556,7 +559,9 @@ def next_actions(run_dir: Path, manifest: dict) -> list[dict]:
         return [{"action": "author", "phase": "media_review",
                  "command": f"{tool} media-review --request {rid} --file <media-review.json>",
                  "reason": "Inspect every scene visually, listen to all narration, and check captions and complete "
-                           "MP4 playback with prompts/media-review.md before final delivery."}]
+                           "MP4 playback with prompts/media-review.md before final delivery. `status` lists the "
+                           f"slides, timeline, and captions; `{tool} preview --request {rid}` makes contact "
+                           "sheets of the rendered slides."}]
     if validation == "needs_review":
         return [{"action": "escalate", "reason": f"Media quality needs attention: runs/{rid}/quality-report.json."}]
     return [{"action": "run", "command": f"{tool} build --request {rid}",
@@ -626,10 +631,20 @@ def request_status(root: Path, run_dir: Path) -> dict:
             storyboard = json.loads((run_dir / "storyboard.json").read_text(encoding="utf-8"))
             result["review_targets"] = list(targets(storyboard))
         if (manifest.get("validation") or {}).get("status") in ("passed", "completed"):
+            from .preview import rendered_sheets
+
             result["media_review_input"] = {"video_sha256": (manifest.get("render") or {}).get("draft_sha256"),
                 "storyboard_digest": (manifest.get("script") or {}).get("digest"),
                 "video_path": str(run_dir / "render/draft.mp4"),
-                "scene_ids": [s["id"] for s in json.loads((run_dir / "storyboard.json").read_text())["scenes"]]}
+                "scene_ids": [s["id"] for s in json.loads((run_dir / "storyboard.json").read_text())["scenes"]],
+                # render.json maps each scene to its slide; timeline.json gives each scene's and caption's times.
+                "slides_directory": str(run_dir / "render/slides"),
+                "render_record": str(run_dir / "render.json"), "timeline": str(run_dir / "timeline.json"),
+                "captions": [str(run_dir / "captions.srt"), str(run_dir / "captions.vtt")],
+                "transcript": str(run_dir / "script.md"),
+                "quality_report": str(run_dir / "quality-report.json"),
+                # Made by `preview` from the rendered slides; None until it has run for this video.
+                "contact_sheets": rendered_sheets(run_dir, manifest)}
     return result
 
 

@@ -11,7 +11,7 @@ prepare ─► sources ─► document ─► glossary ─► glossary_check ─
                                                                    │
    harness writes plan.json ──► plan ◄─────────────────────────────┘
    harness writes storyboard ─► script
-   separate context writes review ─► content_review   (the content gate)
+   preview ─► review-input ─► separate context writes review ─► content_review   (the content gate)
 build ─► narration ─► duration check ─► timing ─► render ─► validation
 media-review ─► visual + listening + captions + MP4 playback ─► delivery
 ```
@@ -43,13 +43,14 @@ the user; a person must decide), or `deliver`.
 | `prepare --document <path or URL> [--ref] [--detail] [--audience] [--target-minutes] [--voice] [--language] [--speed] [--width] [--height] [--output]` | Creates a harness request and runs sources, document, glossary, cross-check, and evidence. Uses the network (GitHub). Stops before content. | `request.json`, `orchestration.json`, `sources.json`, `document.json`, `coverage.md`, `glossary-matches.json`, `glossary-check.json/.md`, `evidence-packet.json` |
 | `status --request <id>` | Stage statuses, artifacts with SHA-256, unresolved issues, next actions, repair budgets, the digests a plan, storyboard, or review must name, and the review targets. Changes nothing. | — |
 | `excerpt --request <id> --path <file> --lines <a>-<b>` | Prints the requested snapshot lines and their evidence ID and SHA-256, with no range-size cap. A file outside the snapshot is reported as missing evidence. | — |
-| `packet --request <id> [--section <id> \| --evidence <id>… \| --glossary [<term>…] \| --settings]` | Prints a complete view of the evidence packet: the index with the request, digests, review state, and one row per section; one section's blocks with the evidence and glossary IDs its units use; excerpts or configuration facts by ID; glossary candidates; or all configuration facts. Text is returned unchanged, with no pagination or response-size cap. | — |
+| `packet --request <id> [--section <id>… \| --document \| --evidence <id>… \| --glossary [<term>…] \| --settings] [--text]` | Prints a complete view of the evidence packet: the index with the request, digests, review state, and one row per section; the blocks of one or more sections with the evidence and glossary IDs their units use; the whole document (every section with content, and the sections left out with the reason); excerpts or configuration facts by ID; glossary candidates; or all configuration facts. Text is returned unchanged, with no pagination or response-size cap. With `--text`, sections or the document are printed as text to read in page order, one sentence, table row, or block per line with its unit ID, instead of one line of JSON. | — |
 | `packet --request <id> --omissions-template [--plan <file>]` | Prints a `revise` patch that adds an omission, with an empty reason, for every eligible section the plan given with `--plan` neither selects nor omits (every eligible section without `--plan`). It also lists those sections' headings, the ones that hold caveats, and the `essential` ones (the question and the page's summary), which cannot be omitted. Changes nothing. | — |
 | `revise --from <file> --patch <patch> --out <new.json>` | Applies a patch (a JSON or YAML list of `set`, `add`, `remove`, and `replace` operations, or an object with the list under `patch`) to a plan, storyboard, or review input file and writes the result as a new file. The source is unchanged; `--out` must not exist and must be outside `runs/` and `output/`. Nothing is written unless every operation matches. Takes no `--request`. | the `--out` file |
 | `plan --request <id> --file <plan.json> [--human-revision]` | Validates and records the content plan. An import that does not pass counts toward the plan repair limit; after pgvideo stops a repair that is not converging, a further import is refused (`repair_stopped`) unless a person made the revision. | `plan.json`, `plan-report.md`, `authored/plan.json` |
 | `script --request <id> --storyboard <file> [--duration-rewrite] [--human-revision]` | Validates and records a harness storyboard. Never starts narration. `--drafter-command <exe>` runs an optional adapter instead. | `draft-input.json`, `storyboard.json`, `script.md`, `authored/storyboard.json` |
-| `review --request <id> --file <review.json>` | Validates the separate review and decides the content gate. | `content-review.json`, `content-report.md`, `authored/review.json` |
-| `review-input --request <id>` | Returns the accepted plan without the writer's assessments, plus current digests and review targets. The independent reviewer uses this view instead of reading `plan.json` or `plan-report.md`. | — |
+| `review --request <id> --file <review.json>` | Validates the separate review and decides the content gate. Refuses a file with a `pending` value and a carried finding that differs from the earlier review. | `content-review.json`, `content-report.md`, `authored/review.json`, `reviews/<storyboard-digest>.json` |
+| `review-input --request <id>` | Writes what the independent reviewer reads and returns the paths, current digests, and counts: `video.md` (everything seen and heard, in playback order, with review target IDs, the plan at a glance, and a one-line-per-scene map), `document.md` (the page as text, marking units no scene cites), `coverage.md`, `checks.md` (the warnings pgvideo's checks leave to the review), `plan.json` (the plan without the writer's assessments), and `review-template.json` (every target, section, and whole-video check `pending`, with the findings carried from the request's previous review). The reviewer uses these instead of reading `plan.json` or `plan-report.md`. | `review-input/` |
+| `preview --request <id>` | Renders every scene's slide from the accepted storyboard, without narration and before the content gate, and lays the slides out nine to a page as contact sheets labeled with slide number and scene ID. Once the request has a rendered video of the same storyboard, the sheets are built from the rendered slides. | `preview/` |
 | `build --request <id> [--no-reuse] [--accept-duration]` | Refuses without the content gate. Narrates, checks measured length, times, renders, and validates, reusing matching media. Returns `passed` with a prepared package; final delivery awaits media review. | `narration/`, `timeline.json`, captions, `render/`, `quality-report.json`, `delivery/` inside the run |
 | `media-review --request <id> --file <media-review.json>` | Checks that an actual visual, listening, caption, and playback review covers the exact current video and every scene. Failed or unavailable checks block delivery. A completed result publishes the package. | `media-review.json`, `authored/media-review.json`, `output/<id>/` |
 | `resume --request <id>` | Repeats the cross-check with `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review without inference. | as the stages it repeats |
@@ -66,8 +67,9 @@ way: one line per rule, with `*` for the list position, the number of places, an
 ### Revision patches
 
 A path is keys joined by dots; after a list, a selector in brackets picks entries: `[2]` a position (`[-1]` the
-last), `[*]` every entry, `[id=size-sets-slot]` the entries whose key has that value, `[=short-answer.1.s1]`
-the entries equal to a value. A selector's value may contain dots.
+last), `[*]` every entry, `[id=size-sets-slot]` the entries whose key has that value, `[target~screen:*:0]` the
+entries whose key matches a pattern (`*` any text, `?` one character), `[=short-answer.1.s1]` the entries equal
+to a value. A selector's value may contain dots.
 
 ```json
 [
@@ -108,9 +110,17 @@ Defaults: detail `standard`; audience "PostgreSQL users and administrators who k
 
 `build` and every media command require, for a harness request: an accepted plan made from the current evidence;
 a storyboard that passed its checks; and a passed review, under the current review policy, of that exact
-storyboard and plan. The review passes only when every factual target is `supported` with resolvable evidence and
-no finding is material. Old requests (made before this workflow) are not gated and keep their extractive
-provenance.
+storyboard and plan. The review passes only when every whole-video check passes, every factual target is
+`supported` with resolvable evidence, and no finding is material. Old requests (made before this workflow) are
+not gated and keep their extractive provenance.
+
+A review starts with the video as a whole. Its `overall` object holds eight checks (`answer`, `objectives`,
+`order`, `repetition`, `caveats`, `scope`, `visuals`, `closing`), each `passed` or `failed` with a message; a
+failed check blocks the gate. pgvideo refuses a review that still holds a `pending` value from the template.
+Each imported review is kept by storyboard digest in `runs/<id>/reviews/`. When the storyboard changes, the
+next template carries the findings of targets whose text, claims, and evidence are unchanged; the review's
+`carried` object names them, and the import checks each one against the kept review. The whole-video checks,
+editorial findings, and coverage are never carried.
 
 The review also covers every heading, screen line, diagram node, code/table excerpt, and glossary card, and
 requires one source-to-video coverage judgment per eligible section with content. Full detail cannot omit an
@@ -120,7 +130,9 @@ Only the isolated reviewer may correct review judgments. Required authoring self
 
 Final delivery has a second gate. Automated validation prepares a package under `runs/<id>/delivery/` without
 publishing it to the configured output. `status.media_review_input` names the MP4 hash, storyboard digest, and
-scene IDs. `media-review` requires visual, listening, and caption checks for every scene and whole-video playback,
+scene IDs, and says where the rendered slides, the render record that maps scenes to slides, the timeline, the
+captions, the transcript, and the quality report are. After `preview` has run for the rendered video, it also
+lists the contact sheets of the rendered slides. `media-review` requires visual, listening, and caption checks for every scene and whole-video playback,
 transition, pacing, ending, and caption-sync checks. Successful import verifies the prepared files' hashes and
 publishes them. `note` cannot substitute for these checks. See `prompts/media-review.md` and its schema.
 
@@ -134,7 +146,7 @@ publishes them. `note` cannot substitute for these checks. See `prompts/media-re
 | A plan needs review | Fix the named issues and import again. An `infeasible_plan` or a contradicted claim is reported to the user. |
 | A plan repair does not converge | pgvideo stops it when three imports in a row report the same blocking issue, or ten in a row have not passed (`status` reports `repairs.plan_imports`). Then escalate; a plan a person revises is imported with `--human-revision`, and a plan that passes clears the limit. |
 | A storyboard needs review | Repair the named issues (prompts/repair.md) and import again. |
-| The review found material issues | Up to two repair rounds; each repaired storyboard needs a new separate review. Then escalate. |
+| The review found material issues | Up to two repair rounds; each repaired storyboard needs a new separate review, which starts from a new `review-input` template that carries the findings of unchanged targets and repeats the whole-video pass. Then escalate. |
 | The measured length missed the target | One `--duration-rewrite`: shorten optional detail when long; expand from unused allowed sources when short, revising the plan first if needed. If expansion is infeasible, report it. Then a new review and `build`; after the budget is used only the user may accept the length. |
 | `AGENTS.md` changed version | `resume` revalidates the saved plan, storyboard, and review under the new instructions. |
 | A model, credential, or quota is unavailable | Stop, keep progress, report the request ID and what is missing; retry transient failures without counting a repair. |
@@ -145,7 +157,9 @@ publishes them. `note` cannot substitute for these checks. See `prompts/media-re
 `request.json` (settings and the instruction version), `orchestration.json` (instructions, prompt and schema
 hashes, producer metadata the harness reported, repairs, events, and media checks), `evidence-packet.json`,
 `plan.json` and `plan-report.md`, `storyboard.json` and `script.md`, `content-review.json` and
-`content-report.md`, `authored/` (the exact files you submitted), `last-result.json`, and the media files. The
+`content-report.md`, `authored/` (the exact files you submitted), `review-input/` (what the reviewer reads),
+`reviews/` (each imported review by storyboard digest, for carrying findings), `preview/` (slides and contact
+sheets), `last-result.json`, and the media files. The
 delivery directory `output/<id>/` holds the MP4, `transcript.md`, captions, `references.md`,
 `glossary-check.md`, `content-report.md`, `plan.md`, `orchestration.json`, `quality-report.json`, and
 `manifest.json`, and `media-review.json`.

@@ -135,7 +135,9 @@ def parser() -> argparse.ArgumentParser:
     review = request_command("review", "import the separate semantic review of the storyboard and decide the "
                                        "content gate")
     review.add_argument("--file", type=Path, required=True, help="review file (JSON or YAML) inside the project")
-    request_command("review-input", "show the accepted plan without writer assessments, plus the review contract")
+    request_command("review-input", "write what a separate reviewer reads: the video as text, the page, coverage, "
+                                    "open checks, the plan without writer assessments, and a review template")
+    request_command("preview", "render every scene's slide and contact sheets for review, without narration")
     media_review = request_command("media-review", "import inspection of every scene and finished MP4 before delivery")
     media_review.add_argument("--file", type=Path, required=True, help="finished-video review file inside the project")
 
@@ -157,11 +159,15 @@ def parser() -> argparse.ArgumentParser:
     excerpt.add_argument("--path", required=True, help="file path in the PostgreSQL snapshot, such as "
                                                        "src/backend/utils/misc/guc_tables.c")
     excerpt.add_argument("--lines", required=True, help="line range such as 120-160")
-    packet = request_command("packet", "print a complete view of the request's evidence packet: its index, or "
-                                       "one section, evidence by ID, glossary entries, or configuration facts")
+    packet = request_command("packet", "print a complete view of the request's evidence packet: its index, "
+                                       "sections, the whole document, evidence by ID, glossary entries, or "
+                                       "configuration facts")
     piece = packet.add_mutually_exclusive_group()
-    piece.add_argument("--section", metavar="ID", help="one section's blocks, with the evidence and glossary IDs "
-                                                       "its units use")
+    piece.add_argument("--section", nargs="+", metavar="ID",
+                       help="the blocks of one or more sections, with the evidence and glossary IDs their "
+                            "units use")
+    piece.add_argument("--document", action="store_true",
+                       help="every section with content, in page order, and the sections the packet leaves out")
     piece.add_argument("--evidence", nargs="+", metavar="ID", help="excerpts or configuration facts by evidence "
                                                                    "ID, such as pg:<path>#L<a>-L<b> or guc:<setting>")
     piece.add_argument("--glossary", nargs="*", metavar="TERM",
@@ -173,6 +179,9 @@ def parser() -> argparse.ArgumentParser:
                        help="a `revise` patch that omits, with empty reasons to fill in, every eligible section "
                             "the plan given with --plan leaves unaccounted (every eligible section without --plan)")
     packet.add_argument("--plan", type=Path, help="plan input file for --omissions-template")
+    packet.add_argument("--text", action="store_true",
+                        help="with --section or --document: text to read in page order, one sentence, row, or "
+                             "block per line with its unit ID, instead of JSON")
     revise = subcommands.add_parser(
         "revise", help="apply a small patch to a plan, storyboard, or review input file and write the result as a "
                        "new revision, so a repair never retypes the file")
@@ -515,13 +524,32 @@ def _import_storyboard(root: Path, run_dir: Path, **options) -> tuple[str, str]:
 
 
 def review_input(args: argparse.Namespace, root: Path) -> int:
-    from .review import review_input as input_view
+    from .review_input import DIRECTORY, write
 
     def work(run_dir: Path):
         _require_harness(run_dir, "review-input")
-        return "passed", "Review input excludes the writer's claim assessments.", {"review_input": input_view(run_dir)}
+        index = write(root, run_dir)
+        counts = index["counts"]
+        return "passed", (f"Review input written to {run_dir / DIRECTORY}: {counts['scenes']} scenes, "
+                          f"{counts['targets']} targets ({counts['carried']} carried, {counts['to_judge']} to "
+                          "judge). It excludes the writer's claim assessments. Read video.md first."), \
+            {"review_input": index}
 
     return _harness_command(root, args, "review_input", work)
+
+
+def preview(args: argparse.Namespace, root: Path) -> int:
+    from .preview import create_preview, current
+
+    def work(run_dir: Path):
+        _require_harness(run_dir, "preview")
+        record = create_preview(root, run_dir)
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        shown = "rendered video" if record["source"] == "render" else "accepted storyboard"
+        return "passed", (f"Preview of the {shown}: {len(record['slides'])} slides on {len(record['sheets'])} "
+                          f"contact sheets in {run_dir / 'preview'}."), {"preview": current(run_dir, manifest)}
+
+    return _harness_command(root, args, "preview", work)
 
 
 def media_review(args: argparse.Namespace, root: Path) -> int:
@@ -667,12 +695,19 @@ def excerpt(args: argparse.Namespace, root: Path) -> int:
 def packet(args: argparse.Namespace, root: Path) -> int:
     """Print a complete view of the evidence packet."""
     from .evidence import packet as load_packet
-    from .packet import view
+    from .packet import text, view
 
     try:
         run_dir, manifest = _request(root, args.request)
         if args.plan and not args.omissions_template:
             raise ValueError("--plan is only used with --omissions-template.")
+        if args.text and not (args.section or args.document):
+            raise ValueError("--text renders sections: give --section <id>… or --document.")
+        if args.text:
+            # Lines, not JSON: a reader pages through them, and a harness does not cut one long line.
+            print(text(load_packet(run_dir, manifest), args.section), end="")
+            print("Complete evidence packet view.", file=sys.stderr)
+            return 0
         if args.omissions_template:
             from . import contracts
             from .planning import omissions_template
@@ -682,7 +717,7 @@ def packet(args: argparse.Namespace, root: Path) -> int:
             found = omissions_template(root, run_dir, load_packet(run_dir, manifest), raw)
         else:
             found = view(load_packet(run_dir, manifest), section=args.section, evidence=args.evidence,
-                         glossary=args.glossary, settings=args.settings)
+                         glossary=args.glossary, settings=args.settings, document=args.document)
     except (ValueError, OSError, KeyError) as error:
         if args.json:
             print(json.dumps({"request_id": args.request, "stage": "packet", "status": "failed", "artifacts": [],
@@ -1136,7 +1171,7 @@ def script(args: argparse.Namespace, root: Path) -> int:
 
 
 COMMANDS = {"prepare": prepare, "status": status, "plan": plan, "script": script, "review": review, "build": build,
-            "review-input": review_input, "media-review": media_review,
+            "review-input": review_input, "preview": preview, "media-review": media_review,
             "resume": resume, "replay": replay, "excerpt": excerpt, "packet": packet, "revise": revise,
             "baseline": baseline,
             "note": note, "narrate": narrate, "timing": timing, "render": render, "validate": validate}

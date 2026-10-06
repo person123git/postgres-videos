@@ -4,6 +4,13 @@ Input: current `status.media_review_input`, the accepted storyboard, rendered sl
 `render/draft.mp4`, and quality report. Read `schemas/media-review.schema.json` before writing the review.
 Output: one JSON file imported with `scripts/pgvideo media-review --request <id> --file <file> --json`.
 
+`status.media_review_input` says where each input is: `video_path`; `slides_directory`, with one PNG per scene
+(`render_record` maps scene IDs to files); `timeline`, with the start and end of every scene and caption, for
+seeking; `captions`; `transcript`; and `quality_report`. Run `scripts/pgvideo preview --request <id> --json`
+first. It lays the rendered slides out nine to a page as `contact_sheets`, each labeled with its slide number
+and scene ID. Look through the sheets before single scenes: they show the video as a whole, and what repeats,
+crowds, or breaks its visual rhythm.
+
 Inspect every scene visually for readability, diagram meaning, correct content, and agreement with narration.
 Listen to all narration for pronunciation, clarity, omissions, clipped sentences, and artifacts. Play the finished
 MP4 from beginning to end with captions to assess pacing, synchronization, transitions, and ending.

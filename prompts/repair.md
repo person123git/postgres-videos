@@ -50,9 +50,10 @@ Example: use this patch only if the findings confirm that source IDs incorrectly
 | `{"op": "replace", "path": P, "find": A, "with": B}` | Replace text `A` by `B` in the strings at `P`. |
 
 A path is keys joined by dots. After a list, a selector in brackets picks entries: `[*]` every entry, `[2]` one
-position, `[id=size-sets-slot]` entries whose key has that value, `[=short-answer.1.s1]` entries equal to a
-value. Examples: `claims[id=size-sets-slot].sources`, `claims[*].assessment.glossary`,
-`scenes[id=answer].narration[1].text`, `omissions[section=details].reason`.
+position, `[id=size-sets-slot]` entries whose key has that value, `[target~screen:*:0]` entries whose key
+matches a pattern (`*` any text, `?` one character), `[=short-answer.1.s1]` entries equal to a value.
+Examples: `claims[id=size-sets-slot].sources`, `claims[*].assessment.glossary`,
+`scenes[id=answer].narration[1].text`, `omissions[section=details].reason`, `findings[verdict=pending]`.
 
 - Use one operation with `[*]` when the same correction applies to every selected entry. Otherwise select
   only the affected IDs; do not change unrelated entries to make one wildcard operation work.

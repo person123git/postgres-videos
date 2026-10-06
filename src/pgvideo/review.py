@@ -2,19 +2,25 @@
 
 The harness reviews the accepted storyboard in a context separate from the one
 that wrote it, with the original evidence and without the writer's
-self-assessment. The review classifies every narration item as factual or not
-(independently of its `origin` label) and judges each factual item, screen line,
-diagram edge, glossary paraphrase, and manually written TTS text against the
-evidence: supported, contradicted, or insufficient_evidence, with evidence IDs
-and a short justification. Editorial findings cover clarity, missing caveats,
-repetition, ordering, and whether the visuals agree with the narration.
+self-assessment. The review first judges the video as a whole: the `overall`
+checks, editorial findings, and source-to-video coverage. It then classifies every
+narration item as factual or not (independently of its `origin` label) and judges
+each factual item, screen line, diagram edge, glossary paraphrase, and manually
+written TTS text against the evidence: supported, contradicted, or
+insufficient_evidence, with evidence IDs and a short justification.
 
 pgvideo checks that the review names this request's current storyboard, plan,
-and evidence; that it declares a separate pass; that it has exactly one finding
-for every target; and that every evidence ID resolves. The gate then passes only
-when every factual target is supported and no finding is material. The
+and evidence; that it declares a separate pass; that nothing in it is still
+pending; that it has exactly one finding for every target; and that every
+evidence ID resolves. The gate then passes only when every whole-video check
+passes, every factual target is supported, and no finding is material. The
 reviewer's words are findings, never statuses, and no confidence score is read.
 A lexical `verified` from Step 6 is kept apart from these semantic verdicts.
+
+Each imported review is also kept by storyboard digest. When a storyboard changes,
+the findings of targets that show and say the same thing, from the same claims and
+evidence, are carried into the next review; `carried` names them and the import
+verifies each one. The whole-video judgments are never carried.
 """
 
 from __future__ import annotations
@@ -37,6 +43,13 @@ RECORD = "content-review.json"
 REPORT = "content-report.md"
 SEVERITIES = ("blocking", "warning", "note")
 REQUEST_FIELDS = ("request_id", "created_at", "producer", "authored")
+# The whole-video checks, in the order a reviewer makes them.
+OVERALL = ("answer", "objectives", "order", "repetition", "caveats", "scope", "visuals", "closing")
+# What a review template holds wherever the reviewer has not judged yet.
+PENDING = "pending"
+# One file per reviewed storyboard digest: its findings and what each target showed, said, and claimed.
+ARCHIVE = "reviews"
+FINDING_KEYS = ("target", "factual", "verdict", "evidence", "justification", "issues")
 
 
 def _now() -> str:
@@ -74,23 +87,83 @@ def targets(storyboard: dict) -> dict[str, dict]:
     return found
 
 
-def review_input(run_dir: Path) -> dict:
-    """Return the review contract without the writer's claim assessments or tool verdicts."""
-    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
-    for stage in ("evidence", "plan", "script"):
-        if (manifest.get(stage) or {}).get("status") != "passed":
-            raise ValueError(f"The {stage} stage must pass before obtaining review input.")
-    plan = json.loads(_recorded(run_dir, "plan.json", manifest["plan"]))
-    keys = ("schema", "request_id", "audience", "detail", "target_minutes", "main_answer", "learning_objectives",
-            "outline", "required_caveats", "omissions")
-    safe = {key: plan[key] for key in keys}
-    claim_keys = ("id", "text", "kind", "sources", "glossary", "depends_on")
-    safe["claims"] = [{key: claim[key] for key in claim_keys if key in claim} for claim in plan["claims"]]
-    storyboard = json.loads(_recorded(run_dir, "storyboard.json", manifest["script"]))
-    return {"plan": safe, "storyboard_path": str(run_dir / "storyboard.json"),
-            "digests": {f"{name}_digest": manifest[stage]["digest"] for name, stage in
-                        (("evidence", "evidence"), ("plan", "plan"), ("storyboard", "script"))},
-            "review_targets": list(targets(storyboard))}
+def signatures(storyboard: dict, plan: dict) -> dict[str, str]:
+    """A digest per target of what it shows or says and of the plan claims behind it.
+
+    Two storyboards give a target the same signature only when its kind, text, origin, manual TTS
+    text, and the wording and sources of its claims are the same. A finding is carried from one
+    review to the next only for such a target.
+    """
+    claims = {claim["id"]: {key: claim.get(key) for key in ("text", "kind", "sources", "glossary")}
+              for claim in plan["claims"]}
+    return {target: canonical_digest({"kind": info["kind"], "text": info["text"], "origin": info.get("origin"),
+                                      "tts": info.get("tts"),
+                                      "claims": {claim: claims.get(claim) for claim in info.get("claims", [])}})
+            for target, info in targets(storyboard).items()}
+
+
+def archived(root: Path, run_dir: Path, digest: str) -> dict | None:
+    """The kept review of one storyboard digest, from this request or one whose accepted content it replays."""
+    for name in sorted(accepted_request_ids(run_dir), key=lambda name: name != run_dir.name):
+        path = root / "runs" / name / ARCHIVE / f"{digest}.json"
+        if path.is_file() and not path.is_symlink():
+            return json.loads(path.read_text(encoding="utf-8"))
+    return None
+
+
+def carry_over(run_dir: Path, manifest: dict, storyboard: dict, plan: dict) -> dict | None:
+    """The findings of this request's latest review of another storyboard that still hold for this one.
+
+    A finding is carried when the review used the current policy and evidence and the target's
+    signature is unchanged. Returns the earlier storyboard's digest and the findings by target.
+    """
+    directory = run_dir / ARCHIVE
+    kept = []
+    for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (record.get("policy") == REVIEW_POLICY and record.get("evidence_digest") == manifest["evidence"]["digest"]
+                and record.get("storyboard_digest") != manifest["script"]["digest"]):
+            kept.append(record)
+    if not kept:
+        return None
+    latest = max(kept, key=lambda record: record["created_at"])
+    current = signatures(storyboard, plan)
+    findings = {target: latest["findings"][target] for target, signature in current.items()
+                if latest["signatures"].get(target) == signature and target in latest["findings"]}
+    return {"from_storyboard_digest": latest["storyboard_digest"], "findings": findings} if findings else None
+
+
+def unfinished(raw) -> list[str]:
+    """Say what a review made from the template still leaves pending; nothing for a finished review."""
+    if not isinstance(raw, dict):
+        return []
+
+    def waiting(key: str, name: str) -> list[str]:
+        items = raw.get(key)
+        return [str(item.get(name)) for item in items if isinstance(item, dict) and item.get("verdict") == PENDING] \
+            if isinstance(items, list) else []
+
+    left = []
+    for key, name, label in (("findings", "target", "finding"), ("coverage", "section", "coverage judgment")):
+        if found := waiting(key, name):
+            left.append(f"{len(found)} {label}(s), such as " + ", ".join(found[:5]))
+    overall = raw.get("overall") if isinstance(raw.get("overall"), dict) else {}
+    if checks := [name for name, check in overall.items()
+                  if isinstance(check, dict) and check.get("verdict") == PENDING]:
+        left.append("the whole-video check(s) " + ", ".join(checks))
+    reviewer = raw.get("reviewer") if isinstance(raw.get("reviewer"), dict) else {}
+    if any(key in reviewer and reviewer[key] in (None, PENDING)
+           for key in ("separation", "writer_context_shared", "writer_self_assessment_seen")):
+        left.append("the `reviewer` block")
+    producer_ = raw.get("producer") if isinstance(raw.get("producer"), dict) else {}
+    if isinstance(producer_.get("harness"), dict) and producer_["harness"].get("name") == PENDING:
+        left.append("`producer.harness.name`")
+    if raw.get("summary") == PENDING:
+        left.append("the `summary`")
+    return left
 
 
 def import_review(root: Path, run_dir: Path, path: Path) -> dict:
@@ -120,6 +193,9 @@ def _import(root: Path, run_dir: Path, path: Path) -> dict:
     data = file.read_bytes()
     where = file.relative_to(root).as_posix()
     raw = contracts.parse(data, where)
+    if left := unfinished(raw):
+        raise ValueError(f"{where} is not a finished review. Still pending: " + "; ".join(left) + ". Judge each "
+                         "one, set it with `scripts/pgvideo revise`, and import the new revision.")
     contracts.require(root, "review", raw, where)
     if raw["request_id"] not in accepted_request_ids(run_dir):
         raise ValueError(f"{where} is for request {raw['request_id']}, not {run_dir.name}.")
@@ -132,10 +208,12 @@ def _import(root: Path, run_dir: Path, path: Path) -> dict:
     reviewer = raw["reviewer"]
     if reviewer["writer_context_shared"] or reviewer["writer_self_assessment_seen"]:
         raise ValueError("The review shared the writer's context or saw its self-assessment. A drafting pass does "
-                         "not count as its own review: review again in a fresh context with only the storyboard, the "
-                         "plan view from `review-input`, and the evidence.")
+                         "not count as its own review: review again in a fresh context with only the files from "
+                         "`review-input`, the storyboard, and the evidence.")
     made_by = producer(root, raw["producer"], phase="review")
-    record = _Gate(root, run_dir, raw, storyboard).build()
+    plan = json.loads(_recorded(run_dir, "plan.json", manifest["plan"]))
+    record = _Gate(root, run_dir, raw, storyboard, plan).build()
+    _keep(root, run_dir, record, raw, storyboard, plan)
     record["reviewer"] = reviewer
     record["producer"] = made_by
     record["authored"] = save_authored(root, run_dir, "review.json", data)
@@ -157,9 +235,21 @@ def _import(root: Path, run_dir: Path, path: Path) -> dict:
     return entry
 
 
+def _keep(root: Path, run_dir: Path, record: dict, raw: dict, storyboard: dict, plan: dict) -> None:
+    """Keep a review by storyboard digest, so the review of a revised storyboard can carry what did not change."""
+    kept = {"schema": SCHEMA_VERSION, "request_id": run_dir.name, "created_at": record["created_at"],
+            "status": record["status"], "policy": REVIEW_POLICY,
+            **{key: record[key] for key in ("storyboard_digest", "plan_digest", "evidence_digest")},
+            "signatures": signatures(storyboard, plan),
+            "findings": {finding["target"]: {key: finding[key] for key in FINDING_KEYS}
+                         for finding in raw["findings"]}}
+    write_atomic(root, run_dir.relative_to(root) / ARCHIVE / f"{record['storyboard_digest']}.json",
+                 (json.dumps(kept, indent=2, ensure_ascii=False) + "\n").encode("utf-8"), label="Request")
+
+
 class _Gate:
-    def __init__(self, root: Path, run_dir: Path, raw: dict, storyboard: dict):
-        self.raw, self.storyboard, self.run_dir = raw, storyboard, run_dir
+    def __init__(self, root: Path, run_dir: Path, raw: dict, storyboard: dict, plan: dict):
+        self.raw, self.storyboard, self.plan, self.root, self.run_dir = raw, storyboard, plan, root, run_dir
         self.resolver = Resolver(root, run_dir)
         self.targets = targets(storyboard)
         self.issues: list[dict] = []
@@ -181,8 +271,13 @@ class _Gate:
         missing = [target for target in self.targets if target not in findings]
         if missing:
             raise ValueError(f"The review leaves {len(missing)} target(s) unjudged, such as "
-                             + ", ".join(missing[:5]) + ". Every narration item, asserting screen line, diagram edge, "
-                             "and manual TTS text needs one finding.")
+                             + ", ".join(missing[:5]) + ". Every narration item, screen heading and line, diagram "
+                             "node and edge, excerpt, glossary card, and manual TTS text needs one finding.")
+        carried = self._carried(findings)
+        for name in OVERALL:
+            check = self.raw["overall"][name]
+            if check["verdict"] == "failed":
+                self.issue("blocking", f"overall_{name}", check["message"], scene="*")
         verdicts = {"supported": 0, "contradicted": 0, "insufficient_evidence": 0, "not_factual": 0}
         for target, finding in findings.items():
             info = self.targets[target]
@@ -220,8 +315,9 @@ class _Gate:
                            issue["message"], **where)
         scenes = {scene["id"] for scene in self.storyboard["scenes"]}
         for item in self.raw["editorial"]:
-            if item["scene"] not in scenes and item["scene"] != "*":
-                raise ValueError(f"An editorial finding names unknown scene {item['scene']}.")
+            if unknown := [scene for scene in (item["scene"], *item.get("related", []))
+                           if scene not in scenes and scene != "*"]:
+                raise ValueError(f"An editorial finding names unknown scene {unknown[0]}.")
             self.issue("blocking" if item["severity"] == "material" else "warning", f"editorial_{item['code']}",
                        item["message"], scene=item["scene"])
         self._coverage()
@@ -235,23 +331,52 @@ class _Gate:
             "storyboard_digest": self.raw["storyboard_digest"],
             "plan_digest": self.raw["plan_digest"],
             "evidence_digest": self.raw["evidence_digest"],
-            "counts": {"targets": len(self.targets), "verdicts": verdicts,
+            "counts": {"targets": len(self.targets), "carried": len(carried), "verdicts": verdicts,
                        "factual": sum(f["factual"] for f in findings.values()),
                        "material": sum(i["severity"] == "blocking" for i in self.issues),
                        "minor": sum(i["severity"] == "warning" for i in self.issues)},
             "findings": [findings[target] | {"scene": self.targets[target]["scene"],
                                              "kind": self.targets[target]["kind"]} for target in self.targets],
+            "overall": self.raw["overall"],
+            **({"carried": {"from_storyboard_digest": self.raw["carried"]["from_storyboard_digest"],
+                            "targets": sorted(carried)}} if carried else {}),
             "editorial": self.raw["editorial"],
             "coverage": self.raw["coverage"],
             "summary": self.raw["summary"],
             "issues": self.issues,
         }
 
+    def _carried(self, findings: dict[str, dict]) -> set[str]:
+        """Check that each finding the review carries is the earlier review's finding for an unchanged target."""
+        claimed = self.raw.get("carried")
+        if not claimed:
+            return set()
+        digest = claimed["from_storyboard_digest"]
+        earlier = archived(self.root, self.run_dir, digest)
+        if earlier is None:
+            raise ValueError(f"The review carries findings from the review of storyboard {digest[:12]}, which this "
+                             "request does not hold. Start from the template that `review-input` writes.")
+        if earlier["policy"] != REVIEW_POLICY or earlier["evidence_digest"] != self.raw["evidence_digest"]:
+            raise ValueError(f"The review of storyboard {digest[:12]} used another review policy or other "
+                             "evidence; its findings cannot be carried. Judge every target again.")
+        current = signatures(self.storyboard, self.plan)
+        for target in claimed["targets"]:
+            if target not in current:
+                raise ValueError(f"The review carries a finding for {target}, which is not a target of the "
+                                 "current storyboard.")
+            if earlier["signatures"].get(target) != current[target]:
+                raise ValueError(f"{target} changed since the review of storyboard {digest[:12]}; its finding "
+                                 "cannot be carried. Remove it from `carried.targets` and judge it.")
+            if {key: findings[target][key] for key in FINDING_KEYS} != earlier["findings"].get(target):
+                raise ValueError(f"The carried finding for {target} differs from the review of storyboard "
+                                 f"{digest[:12]}. To judge it again, remove it from `carried.targets`.")
+        return set(claimed["targets"])
+
     def _coverage(self) -> None:
         manifest = json.loads((self.run_dir / "manifest.json").read_text(encoding="utf-8"))
         packet = json.loads(_recorded(self.run_dir, "evidence-packet.json", manifest["evidence"]))
         sections = {s["id"] for s in packet["sections"] if s["eligible"] and s["blocks"]}
-        plan = json.loads((self.run_dir / "plan.json").read_text(encoding="utf-8"))
+        plan = self.plan
         omitted = {s["section"] for s in plan["omissions"]}
         seen = set()
         for item in self.raw["coverage"]:
@@ -301,12 +426,18 @@ def _render(record: dict, storyboard: dict) -> str:
              "writer's context and self-assessment were not shared",
              f"- {counts['targets']} targets: {verdicts['supported']} supported, {verdicts['contradicted']} "
              f"contradicted, {verdicts['insufficient_evidence']} insufficient evidence, {verdicts['not_factual']} "
-             "not factual",
+             "not factual"
+             + (f"; {counts['carried']} of these findings are carried unchanged from the review of storyboard "
+                f"`{record['carried']['from_storyboard_digest'][:12]}`, whose targets, claims, and evidence are "
+                "the same" if counts.get("carried") else ""),
              f"- Repair rounds used: {record['repairs']['used']} of {record['repairs']['max']}",
              "", "Semantic verdicts come from a separate model review against the evidence. Lexical results come from "
              "pgvideo's lookups of names, numbers, and quoted strings in the pinned source; they are shown apart and "
              "never count as approval of a whole sentence. Neither is a substitute for a person's listening review.",
-             "", f"**Reviewer summary:** {record['summary']}", ""]
+             "", f"**Reviewer summary:** {record['summary']}", "",
+             "## Whole-video review", "",
+             *(f"- **{record['overall'][name]['verdict']}** `{name}` — {record['overall'][name]['message']}"
+               for name in OVERALL), ""]
     if record["issues"]:
         lines += ["## Findings that need attention", ""]
         for severity in SEVERITIES:
@@ -333,7 +464,8 @@ def _render(record: dict, storyboard: dict) -> str:
                      + (f" (evidence: {', '.join(finding['evidence'])})" if finding["evidence"] else ""))
     if record["editorial"]:
         lines += ["", "## Editorial review", ""]
-        lines += [f"- {e['severity']} `{e['code']}` ({e['scene']}): {e['message']}" for e in record["editorial"]]
+        lines += [f"- {e['severity']} `{e['code']}` ({', '.join([e['scene'], *e.get('related', [])])}): "
+                  f"{e['message']}" for e in record["editorial"]]
     lines += ["", "## Source-to-video coverage", ""]
     lines += [f"- `{c['section']}`: **{c['verdict']}** — {c['justification']}" for c in record["coverage"]]
     return "\n".join(lines).rstrip() + "\n"

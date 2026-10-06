@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 from pgvideo.orchestration import request_status
-from pgvideo.review import targets
+from pgvideo.review import OVERALL, targets
 from pgvideo.script import create_baseline
 
 PRODUCER = {"harness": {"name": "recorded-test-harness", "version": "1"}, "model": "unavailable"}
@@ -152,6 +152,7 @@ def recorded_review(root: Path, run_dir: Path, *, verdicts: dict | None = None) 
             "reviewer": {"separation": "fresh_context", "writer_context_shared": False,
                          "writer_self_assessment_seen": False},
             "producer": PRODUCER | {"prompt": "prompts/review.md"},
+            "overall": {name: {"verdict": "passed", "message": "Recorded whole-video check."} for name in OVERALL},
             "findings": findings, "editorial": [],
             "coverage": [{"section": section["id"], "verdict": "allowed_omission" if section["id"] in omitted
                           else "complete", "justification": "Recorded source-to-video coverage check."}

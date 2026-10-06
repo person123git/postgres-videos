@@ -127,10 +127,13 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
                     screen = scene["screen"]
                     image_url = _image(root, run_dir, storyboard, screen)
                     note = f"{storyboard['document']['path']} @ {storyboard['document']['wiki_commit'][:12]}"
+                    # An edge names its nodes by ID; the slide shows their labels, as the review reads them.
+                    node_labels = {node["id"]: node["label"]
+                                   for node in (screen.get("diagram") or {}).get("nodes", [])}
                     html = template.render(font_url=font_url, mono_url=mono_url, layout=screen["layout"],
                                            screen=screen, title=scene["title"], part=scene["part"],
                                            version=storyboard["document"]["version"], source_note=note,
-                                           image_url=image_url)
+                                           image_url=image_url, node_labels=node_labels)
                     html_path = slides_dir / f"{index:03d}.html"
                     html_path.write_text(html, encoding="utf-8")
                     page.goto(html_path.as_uri(), wait_until="load")

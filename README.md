@@ -82,13 +82,14 @@ stage commands; you rarely need to, but every one of them can be run by hand.
 | `scripts/pgvideo plan --request <id> --file <plan.json>` | Imports and checks the harness's content plan. | no |
 | `scripts/pgvideo script --request <id> --storyboard <file>` | Imports and checks the harness's storyboard. Never starts narration. | no |
 | `scripts/pgvideo review --request <id> --file <review.json>` | Imports the separate semantic review and decides the content gate. | no |
-| `scripts/pgvideo review-input --request <id>` | Gives the independent reviewer the plan without writer assessments and lists current digests and review targets. | no |
+| `scripts/pgvideo review-input --request <id>` | Writes what the independent reviewer reads to `runs/<id>/review-input/`: the video as text in playback order, the page as text, source-to-video coverage, the warnings left to the review, the plan without writer assessments, and a review template. | no |
+| `scripts/pgvideo preview --request <id>` | Renders every scene's slide and contact sheets for review, without narration and before the content gate. | no |
 | `scripts/pgvideo build --request <id> [--no-reuse] [--accept-duration]` | Narrates, checks measured length, times, renders, and validates an accepted storyboard. Prepares files for final media review, reusing matching media. | no |
 | `scripts/pgvideo media-review --request <id> --file <review.json>` | Imports visual, listening, caption, and MP4 playback checks for the exact video; publishes the final package only when they pass. | no |
 | `scripts/pgvideo resume --request <id>` | Repeats the glossary cross-check with the request's `resolutions.yaml`, rebuilds the evidence packet, and revalidates the saved plan, storyboard, and review. | no |
 | `scripts/pgvideo replay --request <id> --from <other-id>` | Revalidates another request's accepted content for this request when the evidence, prompts, and review policy match. No new inference. | no |
 | `scripts/pgvideo excerpt --request <id> --path <file> --lines <a>-<b>` | Prints lines of a PostgreSQL file from the request's snapshot with their evidence ID. | no |
-| `scripts/pgvideo packet --request <id> [--section <id> \| --evidence <id>… \| --glossary [<term>…] \| --settings]` | Prints a complete view of the evidence packet: its index, one section, evidence by ID, glossary candidates, or configuration facts. | no |
+| `scripts/pgvideo packet --request <id> [--section <id>… \| --document \| --evidence <id>… \| --glossary [<term>…] \| --settings] [--text]` | Prints a complete view of the evidence packet: its index, sections, the whole document, evidence by ID, glossary candidates, or configuration facts. `--text` prints sections or the document as text to read in page order. | no |
 | `scripts/pgvideo packet --request <id> --omissions-template [--plan <file>]` | Prints a `revise` patch that omits, with empty reasons to fill in, every eligible section the plan leaves unaccounted. | no |
 | `scripts/pgvideo revise --from <file> --patch <patch> --out <new.json>` | Applies a small patch to a plan, storyboard, or review input file and writes a new revision. The source file is unchanged. | no |
 | `scripts/pgvideo baseline --request <id>` | Drafts the old extractive script for comparison. It is never narrated or delivered. | no |
@@ -106,7 +107,7 @@ command, and a failed check stops the command. `scripts/pgvideo <command> --help
 lists a command's options.
 
 The harness-facing commands (`prepare`, `status`, `plan`, `script`, `review`,
-`build`, `review-input`, `media-review`, `resume`, `replay`, `excerpt`, `packet`, `revise`, `baseline`, `note`) take `--json`. They
+`build`, `review-input`, `preview`, `media-review`, `resume`, `replay`, `excerpt`, `packet`, `revise`, `baseline`, `note`) take `--json`. They
 then print one structured result on standard output, with `request_id`,
 `stage`, `status`, `artifacts`, `issues`, `next_actions`, and a `message`
 ([schemas/stage-result.schema.json](schemas/stage-result.schema.json)), and keep
@@ -191,9 +192,12 @@ review:  every scene visually + all narration + captions + complete MP4 playback
    configuration facts against the snapshot, checks screens, code, tables, and
    edge direction, and estimates the length at the Kokoro rate measured on this
    machine. `script.md` shows the result; its checks are labeled lexical.
-4. **Review.** A separate pass uses `review-input` to avoid seeing the writer's claim assessments. It judges every narration item, screen heading and line, diagram
+4. **Review.** A separate pass reads the files that `review-input` writes, which leave out the writer's claim
+   assessments: the whole video as text in playback order, the page, and what no scene cites. It first judges
+   the video as a whole (eight `overall` checks, editorial findings, coverage), looking at the slides that
+   `preview` renders. It then judges every narration item, screen heading and line, diagram
    edge, and hand-written TTS text as supported, contradicted, or lacking
-   evidence, and adds editorial findings. pgvideo accepts the review only for the
+   evidence. pgvideo accepts the review only for the
    exact current storyboard and plan, writes `content-review.json` and
    `content-report.md`, and opens the content gate only when every factual target
    is supported and nothing is material. It also reviews diagram nodes, code/table excerpts and glossary cards,
@@ -268,6 +272,7 @@ pagination or response-size cap:
 ```sh
 scripts/pgvideo packet --request <id> --json                        # index: request, digests, review state, section list
 scripts/pgvideo packet --request <id> --section short-answer --json # one section, with the evidence and glossary IDs it uses
+scripts/pgvideo packet --request <id> --document --text             # the whole page as text, one unit per line with its ID
 scripts/pgvideo packet --request <id> --evidence "pg:src/backend/utils/misc/guc_tables.c#L3769-L3784" guc:track_activity_query_size --json
 scripts/pgvideo packet --request <id> --glossary --json             # every glossary candidate
 scripts/pgvideo packet --request <id> --glossary GIN --json         # one entry in full
@@ -418,7 +423,7 @@ credentials; `--drafter-command` adapters run offline too. See
 
 | Location | Contents |
 | --- | --- |
-| `runs/<id>/` | One request: `request.json`, `orchestration.json`, its read-only inputs, `evidence-packet.json`, `plan.json`, `storyboard.json`, `content-review.json`, the exact files the harness submitted in `authored/`, every stage's record and report, `last-result.json`, audio, slides, and the draft MP4. It is kept after delivery so any stage can be repeated. |
+| `runs/<id>/` | One request: `request.json`, `orchestration.json`, its read-only inputs, `evidence-packet.json`, `plan.json`, `storyboard.json`, `content-review.json`, the exact files the harness submitted in `authored/`, the reviewer's inputs in `review-input/`, each imported review in `reviews/`, slide previews in `preview/`, every stage's record and report, `last-result.json`, audio, slides, and the draft MP4. It is kept after delivery so any stage can be repeated. |
 | `output/<id>/` | The reviewed delivery: `<page>.mp4` (`<page>-summary.mp4` or `<page>-full.mp4` for those levels), `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `glossary-check.md`, `content-report.md`, `plan.md`, `media-review.json`, `orchestration.json`, `quality-report.json`, and `manifest.json`. |
 | `cache/` | Downloads and reusable results: source files by commit, narration units, validated videos in `cache/videos/`, and accepted harness content in `cache/content/`. |
 | `.runtime/` | The local Python runtime, FFmpeg, eSpeak NG, Chromium, temporary files, and `environment-report.json`. |
@@ -902,14 +907,19 @@ declares a separate context and did not see the writer's context or
 self-assessment; and that it has exactly one finding for each narration item,
 screen heading and line, diagram node and edge, code/table excerpt, glossary card, and
 hand-written TTS text (`status --json` lists them as `review_targets`). The gate
-passes when every factual finding is `supported` with resolvable evidence and no
-finding or editorial note is material; minor findings are delivered in
+passes when every whole-video check passed, every factual finding is `supported`
+with resolvable evidence, and no finding or editorial note is material; minor findings are delivered in
 `content-report.md`. After a failed review the harness may import two repaired
 storyboards, each reviewed again; the next needs `--human-revision`. The gate is
 checked by narration, media reuse, timing, rendering, and validation themselves,
-under review policy 2; a new policy requires a new review. The reviewer receives the plan view from `review-input`,
+under review policy 3; a new policy requires a new review. The reviewer receives the plan view from `review-input`,
 not `plan.json` or `plan-report.md`. It must judge coverage for every eligible section with content; full detail
 cannot omit sections or planned claims. Only the isolated reviewer may create or correct review verdicts.
+
+The reviewer fills the template that `review-input` writes; pgvideo refuses a file that still holds a `pending`
+value. When a storyboard is revised, the next template carries the findings of the targets whose text, claims,
+and evidence did not change, and the import verifies each carried finding against the earlier review kept in
+`runs/<id>/reviews/`. The whole-video checks are judged again on every revision.
 
 `build` compares the measured narration with the target. Outside ±15%, it stops
 for one `--duration-rewrite`: shorten optional detail when long; expand from unused allowed content when short,

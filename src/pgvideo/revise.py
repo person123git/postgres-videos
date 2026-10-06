@@ -9,12 +9,14 @@ operation applies.
 
 A path is keys joined by dots, with selectors in brackets after a list:
 `[3]` one entry by position, `[*]` every entry, `[id=size-sets-slot]` the entries
-whose key has that value, and `[=short-answer.1.s1]` the entries equal to a value.
-A selector's value may contain dots. For example:
+whose key has that value, `[target~screen:*:0]` the entries whose key matches a
+pattern (`*` any text, `?` one character), and `[=short-answer.1.s1]` the entries
+equal to a value. A selector's value may contain dots. For example:
 
     claims[id=size-sets-slot].sources          one claim's source list
     claims[*].assessment.glossary              that field of every claim
     omissions[section=details]                 one omission entry
+    findings[target~screen:*:0].verdict        that field of every screen heading's finding
 
 Operations:
 
@@ -34,6 +36,7 @@ import copy
 import hashlib
 import json
 import re
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from . import contracts
@@ -75,14 +78,18 @@ def _children(node, step: tuple[str, str], path: str, *, last: bool = False) -> 
     if _INDEX.fullmatch(name):
         index = int(name) + (len(node) if int(name) < 0 else 0)
         return [(node, index)] if 0 <= index < len(node) else []
-    key, equals, value = name.partition("=")
-    if not equals:
-        raise ValueError(f"{path}: [{name}] must be a position, *, key=value, or =value.")
+    # The first `=` or `~` separates the key from an exact value or a pattern.
+    cut = min((position for position in (name.find("="), name.find("~")) if position >= 0), default=-1)
+    if cut < 0:
+        raise ValueError(f"{path}: [{name}] must be a position, *, key=value, key~pattern, or =value.")
+    key, value = name[:cut], name[cut + 1:]
+    same = (lambda found: str(found) == value) if name[cut] == "=" else (
+        lambda found: fnmatchcase(str(found), value))
     if key:
         return [(node, index) for index, entry in enumerate(node)
-                if isinstance(entry, dict) and key in entry and str(entry[key]) == value]
+                if isinstance(entry, dict) and key in entry and same(entry[key])]
     return [(node, index) for index, entry in enumerate(node)
-            if not isinstance(entry, (dict, list)) and str(entry) == value]
+            if not isinstance(entry, (dict, list)) and same(entry)]
 
 
 def _targets(document, path: str) -> list[tuple]:

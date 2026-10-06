@@ -37,7 +37,7 @@ footer { border-top: 1px solid #496176; padding-top: 1%; color: #a9bdca; font-si
 {% if screen.lines %}{% for line in screen.lines %}<div class="line">{{ line|inline_code }}</div>{% endfor %}{% endif %}
 {% if screen.code %}<pre><code>{{ screen.code.content }}</code></pre>{% endif %}
 {% if screen.table %}<div class="table-wrap"><table><thead><tr>{% for cell in screen.table.header %}<th>{{ cell|inline_code }}</th>{% endfor %}</tr></thead><tbody>{% for row in screen.table.rows %}<tr>{% for cell in row %}<td>{{ cell|inline_code }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% endif %}
-{% if screen.diagram %}<div class="diagram">{% for node in screen.diagram.nodes %}<span class="node">{{ node.label }}</span>{% endfor %}</div><div class="edge-list">{% for edge in screen.diagram.edges %}<span>{{ edge.from }} → {{ edge.to }}{% if edge.label %}: {{ edge.label }}{% endif %}</span>{% endfor %}</div>{% endif %}
+{% if screen.diagram %}<div class="diagram">{% for node in screen.diagram.nodes %}<span class="node">{{ node.label|inline_code }}</span>{% endfor %}</div><div class="edge-list">{% for edge in screen.diagram.edges %}<span>{{ node_labels.get(edge.from, edge.from)|inline_code }} → {{ node_labels.get(edge.to, edge.to)|inline_code }}{% if edge.label %}: {{ edge.label }}{% endif %}</span>{% endfor %}</div>{% endif %}
 {% if screen.terms %}{% for term in screen.terms %}<div class="term"><strong>{{ term.term|inline_code }}</strong> — {{ term.definition|inline_code }}</div>{% endfor %}{% endif %}
 {% if image_url %}<img class="illustration" src="{{ image_url }}" alt="{{ screen.image.alt or '' }}">{% endif %}
 </section>

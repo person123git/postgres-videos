@@ -54,6 +54,24 @@ class RenderTests(unittest.TestCase):
             self.assertLess(max(changes[0], changes[1], changes[3], changes[4]), 1, changes)
             self.assertGreater(changes[2], 1, changes)
 
+    def test_a_diagram_slide_names_edge_ends_by_their_labels(self):
+        from pgvideo.render import _render_slides
+
+        with tempfile.TemporaryDirectory(prefix="pgvideo-render-test-", dir=ROOT / ".runtime/tmp") as temporary:
+            run = Path(temporary)
+            document = {"title": "Sample", "path": "wiki/v18/sample.md", "version": 18, "wiki_commit": "a" * 40}
+            screen = {"layout": "diagram", "heading": "Who calls whom", "lines": [], "diagram": {
+                "nodes": [{"id": "n1", "label": "`pg_stat_get_activity()`"}, {"id": "n2", "label": "Shared memory"}],
+                "edges": [{"from": "n1", "to": "n2", "label": "reads"}]}}
+            storyboard = {"document": document, "scenes": [
+                {"id": "flow", "part": "mechanism", "title": "Flow", "screen": screen, "narration": []}]}
+            _render_slides(ROOT, run, storyboard, {"scenes": [{"frames": 1}]}, run / "render", 640, 360)
+            page = (run / "render/slides/001.html").read_text(encoding="utf-8")
+            # The review reads an edge as label, verb, label; the slide must show the same, not node IDs.
+            self.assertIn("<code>pg_stat_get_activity()</code> → Shared memory: reads", page)
+            self.assertNotIn("n1 → n2", page)
+            self.assertIn('<span class="node"><code>pg_stat_get_activity()</code></span>', page)
+
 
 if __name__ == "__main__":
     unittest.main()

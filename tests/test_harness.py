@@ -195,9 +195,58 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual((full["definition"], full["occurrences"]), (entry["definition"], len(entry["occurrences"])))
 
         # An unknown section, evidence ID, or term fails; nothing is guessed.
-        for options in (("--section", "absent"), ("--evidence", "pg:src/absent.c#L1-L3"), ("--glossary", "absent")):
+        for options in (("--section", "absent"), ("--evidence", "pg:src/absent.c#L1-L3"), ("--glossary", "absent"),
+                        ("--section", "read-path", "absent"), ("--text",)):
             status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
             self.assertEqual((status, result["status"]), (1, "failed"), options)
+
+    def test_packet_serves_several_sections_and_the_document_as_text(self):
+        _result, run_dir = self.prepare()
+        packet = self.load(run_dir, "evidence-packet.json")
+        served = [s for s in packet["sections"] if s["eligible"] and s["blocks"]]
+        self.assertGreater(len(served), 2)
+
+        def view(*options) -> dict:
+            status, result, _stderr = self.command("packet", "--request", run_dir.name, *options)
+            self.assertEqual((status, result["status"]), (0, "passed"), result)
+            return result["packet"]
+
+        def text(*options) -> str:
+            args = cli.parser().parse_args(["packet", "--request", run_dir.name, *options, "--text"])
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(cli.COMMANDS["packet"](args, self.workspace), 0)
+            return stdout.getvalue()
+
+        # Several sections come back in the order asked, each as a single-section view.
+        names = [served[2]["id"], served[0]["id"]]
+        several = view("--section", *names)["sections"]
+        self.assertEqual([s["section"]["id"] for s in several], names)
+        self.assertEqual(several[0], view("--section", names[0]))
+        # The document is every section with content, and names what the packet leaves out and why.
+        document = view("--document")
+        self.assertEqual([s["section"]["id"] for s in document["sections"]], [s["id"] for s in served])
+        left_out = {s["id"] for s in packet["sections"]} - {s["id"] for s in served}
+        self.assertEqual({s["id"] for s in document["not_served"]}, left_out)
+        # As text, every sentence and row is one line that starts with its unit ID, in page order.
+        page = text("--document")
+        lines = page.splitlines()
+        self.assertLess(max(len(line) for line in lines), 2000)
+        positions = []
+        for section in served:
+            for block in section["blocks"]:
+                for unit in block.get("sentences", []) + block.get("rows", []):
+                    line = next(k for k, found in enumerate(lines) if found.lstrip().startswith(f"- `{unit['id']}` "))
+                    positions.append(line)
+                    self.assertIn(" ".join(str(unit.get("text") or unit["cells"][0]).split()), lines[line])
+        self.assertEqual(positions, sorted(positions))
+        for excerpt in packet["evidence"]["excerpts"]:
+            self.assertIn(f"`{excerpt['id']}`", page)
+        for name in left_out:
+            self.assertIn(f"- `{name}` ", page)
+        one = text("--section", names[0])
+        self.assertIn(f"`{names[0]}`", one)
+        self.assertNotIn(f"`{names[1]}` · level", one)
 
     def test_large_packet_views_return_all_items_in_one_response(self):
         _result, run_dir = self.prepare()
@@ -739,20 +788,225 @@ class HarnessTests(unittest.TestCase):
 
     # Recovery ----------------------------------------------------------------------------------
 
+    def review_input(self, run_dir: Path) -> tuple[dict, dict]:
+        """Run `review-input`; return its index and the files it wrote, by name."""
+        status, result, _stderr = self.command("review-input", "--request", run_dir.name)
+        self.assertEqual(status, 0, result)
+        index = result["review_input"]
+        return index, {name: Path(info["path"]).read_text(encoding="utf-8") for name, info in index["files"].items()}
+
+    def finished(self, run_dir: Path, template: dict) -> dict:
+        """A reviewer's finished review: every pending value of the template judged as the recorded review does."""
+        recorded = recorded_review(self.workspace, run_dir)
+        by_target = {finding["target"]: finding for finding in recorded["findings"]}
+        review = copy.deepcopy(template)
+        review.update({key: recorded[key] for key in ("reviewer", "producer", "overall", "coverage", "summary")})
+        review["findings"] = [by_target[f["target"]] if f["verdict"] == "pending" else f for f in review["findings"]]
+        return review
+
     def test_review_input_hides_writer_assessments_and_expands_screen_targets(self):
         _result, run_dir = self.prepare()
         _plan, storyboard = self.content(run_dir)
         self.storyboard(run_dir, storyboard)
-        status, result, _stderr = self.command("review-input", "--request", run_dir.name)
-        self.assertEqual(status, 0, result)
-        view = result["review_input"]
-        self.assertTrue(view["plan"]["claims"])
-        for claim in view["plan"]["claims"]:
+        index, files = self.review_input(run_dir)
+        view = json.loads(files["plan"])
+        self.assertTrue(view["claims"])
+        for claim in view["claims"]:
             self.assertNotIn("assessment", claim)
             self.assertNotIn("lexical", claim)
-        kinds = {t.split(":", 1)[0] for t in view["review_targets"]}
+        # pgvideo's own estimate and section map are not the writer's judgment, so the reviewer gets them.
+        self.assertEqual(view["estimate"], self.load(run_dir, "plan.json")["estimate"])
+        self.assertTrue(any(row["claims"] for row in view["sections"]))
+        expected = self.command("status", "--request", run_dir.name)[1]["review_targets"]
+        kinds = {t.split(":", 1)[0] for t in expected}
         self.assertLessEqual({"screen", "node", "table", "code", "term"}, kinds)
-        self.assertTrue(all(f"screen:{s['id']}:0" in view["review_targets"] for s in storyboard["scenes"]))
+        self.assertTrue(all(f"screen:{s['id']}:0" in expected for s in storyboard["scenes"]))
+        template = json.loads(files["template"])
+        self.assertEqual([f["target"] for f in template["findings"]], expected)
+        self.assertEqual((index["counts"]["targets"], index["counts"]["to_judge"]), (len(expected), len(expected)))
+        self.assertEqual(index["digests"], {key: template[key] for key in index["digests"]})
+
+    def test_review_input_shows_the_whole_video_and_page_for_reading(self):
+        # A summary leaves sections out, so some of the page's units are cited by no scene.
+        _result, run_dir = self.prepare("--detail", "summary")
+        _plan, storyboard = self.content(run_dir)
+        _record, accepted = self.storyboard(run_dir, storyboard)
+        index, files = self.review_input(run_dir)
+        video, template = files["video"], json.loads(files["template"])
+        # Every target appears once, at the element it judges, and the scenes are in playback order.
+        for finding in template["findings"]:
+            self.assertEqual(video.count(f"`{finding['target']}`"), 1, finding["target"])
+        headings = [video.index(f"### {number}. `{scene['id']}`: ")
+                    for number, scene in enumerate(accepted["scenes"], 1)]
+        self.assertEqual(headings, sorted(headings))
+        for scene in accepted["scenes"]:
+            for item in scene["narration"]:
+                self.assertIn(item["text"], video)
+                # What the reviewer reads first has no source lists and no lexical verdicts to lean on.
+                self.assertNotIn(item["check"]["status"] + ",", video)
+        self.assertIn("## Map", video)
+        self.assertIn(self.load(run_dir, "plan.json")["main_answer"]["text"], video)
+        # The page is readable in order, and a unit no scene cites is marked there and listed in the coverage file.
+        packet = self.load(run_dir, "evidence-packet.json")
+        cited = {source for scene in accepted["scenes"] for source in scene["sources"]}
+        units = [(section["id"], block["id"], unit["id"], unit["text"])
+                 for section in packet["sections"] if section["eligible"]
+                 for block in section["blocks"] for unit in block.get("sentences", [])]
+        self.assertTrue(units)
+        uncited = [unit for section, block, unit, _text in units if not {section, block, unit} & cited]
+        self.assertTrue(uncited)
+        for _section, _block, unit, text in units:
+            line = next(line for line in files["document"].splitlines() if line.startswith(f"- `{unit}` "))
+            self.assertIn(text, line)
+            self.assertEqual("[no scene cites this]" in line, unit in uncited, unit)
+        for unit in uncited:
+            self.assertIn(f"- `{unit}` ", files["coverage"])
+        self.assertEqual(index["counts"]["units"] - index["counts"]["units_cited"],
+                         files["document"].count("[no scene cites this]"))
+        # Warnings that pgvideo's checks address to the review reach the reviewer in full.
+        issues = [issue for name in ("plan.json", "storyboard.json") for issue in self.load(run_dir, name)["issues"]
+                  if issue["severity"] in ("warning", "note")]
+        self.assertTrue(issues)
+        for issue in issues:
+            self.assertIn(" ".join(issue["message"].split()), files["checks"])
+        # The files are also on disk for a reviewer that reads them in parts.
+        self.assertEqual(self.load(run_dir, "review-input/index.json")["files"], index["files"])
+
+    def test_a_template_with_pending_judgments_is_not_a_review(self):
+        _result, run_dir = self.prepare()
+        _plan, storyboard = self.content(run_dir)
+        self.storyboard(run_dir, storyboard)
+        _index, files = self.review_input(run_dir)
+        template = json.loads(files["template"])
+        self.assertTrue(all(f["verdict"] == "pending" for f in template["findings"]))
+        path = authored(self.workspace, run_dir, "review.json")
+        with self.assertRaisesRegex(ValueError, r"not a finished review.*finding\(s\).*whole-video check"):
+            import_review(self.workspace, run_dir, write(path, template))
+        # One judgment left pending is enough to refuse it, whichever part it is in.
+        for change, message in (
+                (lambda r: r["findings"][0].update(verdict="pending"), r"1 finding\(s\)"),
+                (lambda r: r["coverage"][0].update(verdict="pending"), r"1 coverage judgment\(s\)"),
+                (lambda r: r["overall"]["order"].update(verdict="pending"), "whole-video check.* order"),
+                (lambda r: r["reviewer"].update(writer_context_shared=None), "`reviewer` block"),
+                (lambda r: r.update(summary="pending"), "the `summary`")):
+            review = self.finished(run_dir, template)
+            change(review)
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                import_review(self.workspace, run_dir, write(path, review))
+        # The reviewer fills the template with patches, including one judgment for many targets.
+        patch_file = write(authored(self.workspace, run_dir, "fill.json"), [
+            {"op": "set", "path": "findings[target~screen:*:0].justification", "value": "A scene heading."},
+            {"op": "set", "path": "findings[verdict=pending].factual", "value": False},
+            {"op": "set", "path": "findings[verdict=pending].verdict", "value": "not_factual"}])
+        out = authored(self.workspace, run_dir, "review.v1.json")
+        status, result, _stderr = self.command("revise", "--from",
+                                               f"runs/{run_dir.name}/review-input/review-template.json",
+                                               "--patch", str(patch_file), "--out", str(out))
+        self.assertEqual((status, result["status"]), (0, "passed"), result)
+        filled = json.loads(out.read_text(encoding="utf-8"))
+        headings = [f for f in filled["findings"] if f["target"].endswith(":0") and f["target"].startswith("screen:")]
+        self.assertEqual(result["changes"][0]["matched"], len(headings))
+        self.assertTrue(all(f["justification"] == "A scene heading." for f in headings))
+        self.assertFalse([f for f in filled["findings"] if f["verdict"] == "pending"])
+        self.assertEqual(self.review(run_dir)["status"], "passed")
+        record = import_review(self.workspace, run_dir, write(path, self.finished(run_dir, template)))
+        self.assertEqual(record["status"], "passed")
+
+    def test_the_whole_video_checks_gate_the_review(self):
+        _result, run_dir = self.prepare()
+        _plan, storyboard = self.content(run_dir)
+        _record, accepted = self.storyboard(run_dir, storyboard)
+        path = authored(self.workspace, run_dir, "review.json")
+        review = recorded_review(self.workspace, run_dir)
+        del review["overall"]
+        with self.assertRaisesRegex(ValueError, "'overall' is a required property"):
+            import_review(self.workspace, run_dir, write(path, review))
+        review = recorded_review(self.workspace, run_dir)
+        del review["overall"]["closing"]
+        with self.assertRaisesRegex(ValueError, "'closing' is a required property"):
+            import_review(self.workspace, run_dir, write(path, review))
+        review = recorded_review(self.workspace, run_dir)
+        review["overall"]["order"] = {"verdict": "failed", "message": "A term is used two scenes before it is defined."}
+        first, second = accepted["scenes"][1]["id"], accepted["scenes"][2]["id"]
+        review["editorial"].append({"scene": second, "related": [first], "code": "ordering", "severity": "minor",
+                                    "message": "The definition comes after its first use."})
+        record = import_review(self.workspace, run_dir, write(path, review))
+        self.assertEqual(record["status"], "needs_review")
+        kept = self.load(run_dir, "content-review.json")
+        self.assertIn("overall_order", self.blocking(kept))
+        self.assertEqual(kept["overall"]["order"]["verdict"], "failed")
+        report = (run_dir / "content-report.md").read_text(encoding="utf-8")
+        self.assertIn("## Whole-video review", report)
+        self.assertIn("**failed** `order`", report)
+        self.assertIn(f"({second}, {first})", report)
+        review["editorial"][-1]["related"] = ["absent-scene"]
+        with self.assertRaisesRegex(ValueError, "unknown scene absent-scene"):
+            import_review(self.workspace, run_dir, write(path, review))
+
+    def test_unchanged_findings_are_carried_to_the_review_of_a_revised_storyboard(self):
+        _result, run_dir = self.prepare()
+        _plan, storyboard = self.content(run_dir)
+        self.storyboard(run_dir, storyboard)
+        # Nothing is carried into a first review, and a failed review is kept like a passed one.
+        index, files = self.review_input(run_dir)
+        self.assertEqual((index["counts"]["carried"], index["carried_from_storyboard_digest"]), (0, None))
+        self.assertNotIn("carried", json.loads(files["template"]))
+        first = recorded_review(self.workspace, run_dir)
+        path = authored(self.workspace, run_dir, "review.json")
+        scene = next(s for s in storyboard["scenes"] if any(n["origin"] == "framing" for n in s["narration"]))
+        position = next(k for k, n in enumerate(scene["narration"], 1) if n["origin"] == "framing")
+        changed_target = f"narration:{scene['id']}.n{position}"
+        next(f for f in first["findings"] if f["target"] == changed_target)["issues"] = [
+            {"code": "other", "severity": "material", "message": "Recorded material finding."}]
+        self.assertEqual(import_review(self.workspace, run_dir, write(path, first))["status"], "needs_review")
+        earlier = first["storyboard_digest"]
+        self.assertTrue((run_dir / "reviews" / f"{earlier}.json").is_file())
+
+        scene["narration"][position - 1]["text"] = scene["narration"][position - 1]["text"].rstrip(".") + " today."
+        self.assertEqual(self.storyboard(run_dir, storyboard)[0]["status"], "passed")
+        index, files = self.review_input(run_dir)
+        template = json.loads(files["template"])
+        pending = [f["target"] for f in template["findings"] if f["verdict"] == "pending"]
+        self.assertEqual(pending, [changed_target])
+        self.assertEqual(template["carried"]["from_storyboard_digest"], earlier)
+        self.assertEqual(set(template["carried"]["targets"]),
+                         {f["target"] for f in template["findings"]} - set(pending))
+        self.assertEqual((index["counts"]["carried"], index["counts"]["to_judge"]), (len(template["findings"]) - 1, 1))
+        # The whole-video judgments are never carried, and the reading file marks what is.
+        self.assertTrue(all(check["verdict"] == "pending" for check in template["overall"].values()))
+        self.assertTrue(all(item["verdict"] == "pending" for item in template["coverage"]))
+        self.assertNotIn(f"`{changed_target}` [carried]", files["video"])
+        self.assertEqual(files["video"].count("[carried]"), len(template["carried"]["targets"]))
+
+        review = self.finished(run_dir, template)
+        record = import_review(self.workspace, run_dir, write(path, review))
+        self.assertEqual((record["status"], record["counts"]["carried"]), ("passed", len(template["findings"]) - 1))
+        self.assertIn("carried unchanged from the review of storyboard",
+                      (run_dir / "content-report.md").read_text(encoding="utf-8"))
+        require_content_gate(run_dir, self.load(run_dir, "manifest.json"))
+
+        def refused(change, message):
+            altered = copy.deepcopy(review)
+            change(altered)
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                import_review(self.workspace, run_dir, write(path, altered))
+
+        carried = review["carried"]["targets"][0]
+        refused(lambda r: next(f for f in r["findings"] if f["target"] == carried).update(justification="Rewritten."),
+                "carried finding .* differs from the review")
+        refused(lambda r: r["carried"]["targets"].append(changed_target), "changed since the review of storyboard")
+        refused(lambda r: r["carried"].update(from_storyboard_digest="0" * 64), "does not hold")
+        refused(lambda r: r["carried"]["targets"].append("narration:absent.n1"), "not a target of the current")
+
+        # A reviewer may judge a carried target again by taking it out of the list.
+        again = copy.deepcopy(review)
+        again["carried"]["targets"].remove(carried)
+        next(f for f in again["findings"] if f["target"] == carried)["justification"] = "Judged again."
+        self.assertEqual(import_review(self.workspace, run_dir, write(path, again))["counts"]["carried"],
+                         len(template["findings"]) - 2)
+        # Saved content is revalidated with its carried findings.
+        status, result, _stderr = self.command("resume", "--request", run_dir.name)
+        self.assertEqual((status, result["status"]), (0, "passed"), result)
 
     def test_verbatim_excerpts_still_require_semantic_review(self):
         _result, run_dir = self.prepare()
