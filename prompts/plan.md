@@ -43,7 +43,8 @@ that appear inside it.
    `sentence_pause_seconds` between sentences and `scene_pause_seconds` per scene.
    - `summary`: the main answer and its qualifications.
    - `standard`: the mechanism and useful examples, within the target.
-   - `full`: all eligible sections, no ceiling (`target_minutes` is null).
+   - `full`: every fact, example, and qualification of the eligible sections, each taught once
+     ([AGENTS.md](../AGENTS.md#rules-that-apply-at-every-stage) rule 9); no ceiling (`target_minutes` is null).
    The total must fit `request.target_minutes` within `request.tolerance`. If the mandatory content cannot fit,
    set `feasibility.status` to `infeasible` with a note; never silently drop a qualification or overrun.
 

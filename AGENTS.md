@@ -1,4 +1,4 @@
-<!-- instructions-version: 8 -->
+<!-- instructions-version: 9 -->
 # AGENTS.md: pgvideo workflow
 
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
@@ -67,6 +67,13 @@ or invalid stage; it does not start a new request.
 8. **Continue automatically when permitted.** A video request authorizes the normal local workflow. Do not ask
    for routine approval between successful stages. Ask only for blocking information or a required decision;
    respect environment permission prompts.
+9. **Say each thing once.** A page often states one fact in several sections: an overview table, a diagram, the
+   detailed steps, a summary. Explain each fact and example in full in one place, its *home*: the section that
+   explains it in most detail. Other sections narrate only what they add, and name the fact in a few words.
+   Move a qualification that only a restatement carries to the home; never drop it. Define each glossary term
+   once, where it is first needed. This applies at every detail level: `full` means every fact and
+   qualification is taught, not that every section's wording is narrated. The question, the main answer, and
+   one closing takeaway are exempt.
 
 ## Local `wiki_content/` and the remote `wiki/` folder
 
@@ -388,7 +395,8 @@ scripts/pgvideo packet --request "<id>" --glossary "<term>" --json
 ```
 
 1. **Selection pass.** Read the index, including its corrections, omissions, and resolutions. Then read every
-   eligible section with its caveat flag, and record it in the coverage ledger before fetching the next. Select
+   eligible section with its caveat flag, and record it in the coverage ledger before fetching the next. Add
+   `same as <section-id>` to the line of a section that states a fact an earlier line already keeps. Select
    content only after the ledger marks every eligible section read.
 2. **Evidence pass.** For every claim and caveat you keep, fetch the evidence its sources cite and the glossary
    entries for the terms it uses, including each candidate of an ambiguous term, and assess the claim against
@@ -401,7 +409,7 @@ scripts/pgvideo excerpt --request "<id>" --path "<snapshot-file>" --lines "<star
 ```
 
 Write the main answer, learning objectives, ordered outline, time budgets, claims with source and evidence
-assessments, required caveats, and reasons for omitted eligible sections.
+assessments, required caveats, and reasons for omitted eligible sections. Explain each fact in one claim (rule 9).
 Copy request settings unchanged. If the source material cannot satisfy the required scope and duration, set
 `feasibility.status` to `infeasible` with the reason. Do not change the target or remove necessary qualifications.
 
@@ -409,11 +417,55 @@ The page's question and summary sections are never omitted: for each, cite one o
 `question.1.s1`) in the `sources` of a claim that an outline item narrates. Only claim `sources` select a
 section; an outline item's `part` or title does not.
 
+Before the import, run [the repetition check](#repetition-check-before-the-plan-import).
+
 ```sh
 scripts/pgvideo plan --request "<id>" --file ".scratch/<id>/plan.v1.json" --json
 ```
 
 Continue only when the plan passes. Report an infeasible plan or a source conflict that needs a person's decision.
+
+### Repetition check before the plan import
+
+pgvideo expects every planned claim to be narrated, so a fact claimed in three sections is heard three times.
+Remove repeats in the plan, before the storyboard exists. In the commands, use your latest revision's filename.
+
+1. Before you write the claims, choose the home of every fact that the ledger marks `same as` (rule 9). Only
+   the home's claim explains the fact in full.
+2. When the draft is complete, list the source evidence that claims in three or more outline items cite:
+
+   ```sh
+   jq -r '([.outline[] | .id as $o | .claims[] | {key: ., value: $o}] | from_entries) as $item
+     | [.claims[] | select(.kind != "definition") | .id as $c | (.assessment.evidence // [])[]
+        | select(startswith("pg:")) | {e: ., c: $c, o: $item[$c]}]
+     | group_by(.e)[] | select((map(.o) | unique | length) >= 3)
+     | "\(map(.o) | unique | length)\t\(.[0].e)\t\(map(.c) | unique | join(" "))"' \
+     ".scratch/<id>/plan.v1.json" | sort -rn > ".scratch/<id>/repeats-plan.tsv"
+   ```
+
+   Each line holds a count of outline items, one evidence ID, and the claims that cite it. A line is a
+   candidate, not a verdict: a claim that applies the fact to its own example or numbers is not a repeat.
+3. Go through the file once, largest count first, in bounded reads. Read the `text` of the claims on each line.
+   Where several explain the same fact:
+   - keep the explanation in the home claim. If another claim carries a condition, exception, version scope, or
+     uncertainty that the home claim lacks, add it to the home claim first (rule 2);
+   - cut the restated sentences from the other claims' `text` and keep what each adds;
+   - remove a claim that has nothing left, remove its ID from `outline[*].claims` and `depends_on`, and add its
+     `sources` to the home claim so that its section stays selected;
+   - lower `budget_seconds` for each outline item you shortened.
+
+   Never remove a claim that `main_answer.claims` or `required_caveats` names.
+4. Each glossary term has at most one definition claim, and none when the sentence you narrate already says
+   what the term means. This command must print nothing:
+
+   ```sh
+   jq -r '[.claims[] | select(.kind == "definition") | {g: (.glossary // [])[], c: .id}] | group_by(.g)[]
+     | select(length > 1) | "\(.[0].g)\t\(map(.c) | join(" "))"' ".scratch/<id>/plan.v1.json"
+   ```
+
+5. Make every change with `revise`. The file from step 2 is a worklist, not a gate: shared evidence remains
+   after a correct fix. Record in state the lines you changed and the lines you left, then import. Do not
+   repeat step 3.
 
 ## 3. Write and import the storyboard
 
@@ -427,6 +479,25 @@ and the accepted plan. Fetch the sections, evidence, and glossary entries the pl
 - Each diagram edge needs the narrated sentence and plan claims that support its label and direction.
 - Follow the draft prompt's layout limits and exact-copy rules for code, tables, and glossary definitions.
 - Keep all required qualifications. Budget the script against the accepted plan.
+
+Before the import, check the draft for repeats. Both commands must print nothing. The only allowed hit is the
+closing takeaway repeating a sentence of the main answer. Fix every other hit with `revise`: keep the sentence
+or definition in one narration item and remove it from the others. When two plan claims cause the repeat, fix
+the plan first. In the commands, use your latest revision's filename.
+
+```sh
+# The same sentence in more than one narration item.
+jq -r '[.scenes[] | .id as $s | .narration | to_entries[] | "\($s).n\(.key + 1)" as $n | .value.text
+    | splits("(?<=[.!?]) +") | select(test("^(\\S+ +){5}"))
+    | {k: (ascii_downcase | gsub("[^a-z0-9 ]"; "")), n: $n}]
+  | group_by(.k)[] | select((map(.n) | unique | length) > 1)
+  | "\(map(.n) | unique | join(" "))\t\(.[0].k)"' ".scratch/<id>/storyboard.v1.json"
+# A glossary term defined in more than one scene.
+jq -r '[.scenes[] | .id as $s | ((.narration[] | select(.origin == "glossary") | (.glossary // [])[]),
+      ((.screen.terms // [])[] | .anchor)) | {g: ., s: $s}]
+  | unique | group_by(.g)[] | select(length > 1)
+  | "\(.[0].g)\t\(map(.s) | join(" "))"' ".scratch/<id>/storyboard.v1.json"
+```
 
 ```sh
 scripts/pgvideo script --request "<id>" --storyboard ".scratch/<id>/storyboard.v1.json" --json
@@ -449,7 +520,9 @@ reviewer obtain them. Allow `excerpt` for additional pinned evidence.
 
 Require exactly one finding for every review target. The reviewer must check both that each technical claim
 comes from the document or allowed glossary and that its evidence supports its meaning. Content outside those
-sources is a material finding even if a PostgreSQL source file supports it. Report review separation truthfully.
+sources is a material finding even if a PostgreSQL source file supports it. Require an editorial `repetition`
+finding, with both scene IDs in its message, for every fact or definition that the video explains in full more
+than once. Report review separation truthfully.
 
 ```sh
 scripts/pgvideo review --request "<id>" --file ".scratch/<id>/review.v1.json" --json
