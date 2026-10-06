@@ -11,23 +11,18 @@ For all repository work, use the temporary-file convention below.
 1. Before a file write, use [the write decision table](#mandatory-file-writing-and-recovery).
    **An existing plan, storyboard, or review that parses as JSON MUST be changed with
    `scripts/pgvideo revise`. This includes files rejected by a schema or content check.**
-2. Use **32k tokens as a configured ceiling**, including tool-call arguments, or the actual model/tool limit
-   when lower. Size each write to fit the remaining budget, leaving headroom for wrappers, escaping, and
-   completing the call. If the runtime limit is unknown, use conservative bounded chunks.
-   After a size failure or `Unterminated string`, inspect what was saved and reduce the next write.
-   **Never resend the whole file, even under a new name.**
-3. After a failed command, inspect its exact error and correct the cause. Follow
+2. After a failed command, inspect its exact error and correct the cause. Follow
    [the recovery rules](#mandatory-file-writing-and-recovery) before retrying.
-4. For videos, run only the next permitted stage. Read the complete `status`, `issues`, and
+3. For videos, run only the next permitted stage. Read the complete `status`, `issues`, and
    `next_actions` after each command. Continue until delivery or an explicit stop condition below.
-5. **Stop when a repair is not converging.** After each import, compare its blocking issues with the earlier
+4. **Stop when a repair is not converging.** After each import, compare its blocking issues with the earlier
    imports of that stage. Stop and report the issue, request ID, report path, and what you tried when the same
    blocking issue survives two fixes, when an issue you already fixed returns, or when you have no fix left
    that you have not already tried. pgvideo enforces this for plans; see
    [repair](#5-repair-only-when-a-result-requests-it).
 
-The output budget applies to patches, heredocs, and helper scripts too. Splitting a complete replacement
-across calls does not make it an allowed repair. Do not regenerate an existing input with Python.
+Splitting a complete replacement across calls does not make it an allowed repair. Do not regenerate an
+existing input with Python.
 
 ## Video workflow scope
 
@@ -142,7 +137,7 @@ directory per PostgreSQL version), but they play different roles.
   substitute for the required result checks.
 - Use [the file-writing and recovery rules](#mandatory-file-writing-and-recovery) after any failed write
   or import. Do not repeat a failed command without correcting its cause or confirming a transient cause
-  has cleared. A write-size failure always requires a smaller payload.
+  has cleared.
 - End a turn only when the task is complete or a rule here tells you to stop. Do not end a turn by announcing a
   next step; perform it with a tool call in the same turn.
 - Load referenced prompts, schemas, and workflow documentation only when their task or phase applies.
@@ -165,28 +160,11 @@ a schema rejection or `needs_review` result does **not** mean the JSON syntax is
 | File state | Required action |
 | --- | --- |
 | A write just failed or was cut off | Do failed-write recovery first, then classify the saved file again. |
-| No draft exists yet | Create the first draft in bounded chunks. |
+| No draft exists yet | Create the first draft. |
 | First draft is still being assembled | Append the next chunk at the confirmed saved position; validate when complete. |
 | A complete draft parses as JSON | Write a small patch and run `scripts/pgvideo revise`. |
 | Latest draft is invalid; an earlier valid revision exists | Use that valid revision as `--from`; patch the needed changes. |
 | Complete first draft is invalid; no valid revision exists | Use the syntax-only recovery below. |
-
-**Forbidden repairs:** retyping the file, emitting its full content under a new filename, regenerating it with
-a helper script, or replacing its entire top-level arrays to change a few entries. Renaming the file,
-minifying JSON, or splitting the replacement into chunks does not make these repairs allowed.
-These restrictions apply even when the first import failed and nothing has been accepted yet.
-
-### Write-size limits
-
-- The configured output ceiling is **32k tokens** per response; use the actual model/tool limit when lower.
-  This includes tool-call arguments. Count all emitted
-  content together: file content, patch text, helper scripts, wrappers, escaping, and surrounding text.
-  Leave headroom to finish the call; split content into smaller chunks when it will not fit.
-- There is no separate fixed line or character cap for an initial write. Respect any lower tool limit and
-  the reduced limits after a write failure.
-- For a first draft only, write the first chunk once; append later chunks in separate calls with
-  `cat >> <file> <<'EOF'`. Never repeat `>` on a partially written draft. Do not draft the full file in reasoning.
-- This budget bounds content you emit. A file generated by `revise` may be much larger.
 
 ### Required sequence for a valid existing input
 
@@ -246,53 +224,9 @@ Use this exception only when `jq empty` fails and there is no earlier valid inpu
 2. Preserve the broken draft. Use a filesystem copy to a new scratch filename, then make a small
    syntax edit in that copy. This exception permits copying on disk, never emitting the full file again.
 3. Run `jq empty` after each fix. After two unsuccessful syntax fixes, replace only the smallest
-   broken entry in bounded chunks. Do not replace the whole document or its top-level arrays.
+   broken entry. Do not replace the whole document or its top-level arrays.
 4. If the entry repair still fails, stop and report the parser error and file path. If it passes,
    use this as the valid input; every later content or schema fix MUST use `revise`.
-
-## Writing JSON files
-
-Every completed `.json` file you write must be strict, valid JSON (RFC 8259). Validate it after the last
-chunk and after every edit, including patches and revisions produced by `revise`:
-
-```sh
-jq empty path/to/file.json && echo OK
-```
-
-If validation fails, follow the recovery rules above. Never import invalid or unfinished JSON.
-If a stop rule applies, report unfinished files; do not claim they are complete.
-
-- Use double quotes for all keys and strings, never single quotes.
-- Put no trailing comma after the last item in an object or array.
-- Write no comments (`//` or `/* */`); JSON does not support them.
-- Escape special characters inside strings: `\"` for quotes, `\\` for backslashes, `\n` for newlines. Never put
-  a raw line break inside a string.
-- Use lowercase `true`, `false`, and `null`, never `True`, `None`, `NaN`, or `undefined`.
-- Leave numbers unquoted (`42`, not `"42"`) unless the schema says string.
-- Write only the JSON into the file: no Markdown fences and no explanation text before or after it.
-- Indent with 2 spaces and end the file with a single newline.
-- Write dates as ISO 8601 strings, `"2026-10-02"` or `"2026-10-02T14:30:00Z"`, unless the schema says otherwise.
-
-Correct:
-
-```json
-{
-  "name": "widget",
-  "count": 3,
-  "enabled": true,
-  "tags": ["a", "b"],
-  "note": "She said \"hi\"\nthen left"
-}
-```
-
-- **Large first drafts only.** For a new file over about 100 lines, or one built from data, you may write a short
-  Python script in `.scratch/<id>/` that builds the object and calls
-  `json.dump(obj, f, indent=2, ensure_ascii=False)`, instead of typing JSON by hand. Run it with
-  `.venv/bin/python`. Each call that writes the helper must obey the output budget and any reduced limits.
-  A helper may create the first draft; it MUST NOT recreate a plan, storyboard, or review to repair it.
-- **Existing inputs.** Follow the required `revise` sequence above. For other JSON files you own, inspect the
-  enclosing entry and edit only that entry. Keep key names and structure unless asked
-  to change them. Never edit the JSON pgvideo owns under `runs/<id>/`.
 
 ## Tool use and file ownership
 
@@ -546,7 +480,7 @@ round. After an import, use its findings and `next_actions`. Content and media f
 - After a person records source resolutions, or the instruction version changes, follow `status` and use
   `scripts/pgvideo resume --request "<id>" --json` to recheck evidence and saved artifacts.
 - Stop for an unresolved source decision, integrity failure, unavailable required tool or model, infeasible
-  plan, exhausted repair budget, or a repair that is not converging (execution rule 5). Report
+  plan, exhausted repair budget, or a repair that is not converging (execution rule 4). Report
   the exact issue, request ID, and next action.
 - Never substitute `baseline` for the requested video; it is only an extractive comparison.
 
