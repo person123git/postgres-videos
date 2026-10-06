@@ -50,11 +50,11 @@ Then open the repository in your harness and ask for a video:
 > administrator. Aim for three minutes.
 
 The harness downloads the latest wiki into `runs/<id>/wiki_content/`, reads the
-page there, writes `.scratch/<id>/plan.json` and
-`.scratch/<id>/storyboard.json`, and runs:
+page there, writes `runs/<id>/scratch/plan.json` and
+`runs/<id>/scratch/storyboard.json`, and runs:
 
 ```sh
-scripts/pgvideo build --storyboard .scratch/<id>/storyboard.json --request <id> --json
+scripts/pgvideo build --storyboard runs/<id>/scratch/storyboard.json --request <id> --json
 ```
 
 It finishes by reporting the delivered files:
@@ -66,8 +66,8 @@ output/<id>/transcript.md, captions.srt, captions.vtt, references.md,
 ```
 
 Ask the harness to continue a request later; what it wrote is in
-`.scratch/<id>/`, and the wiki it downloaded and the last build are in
-`runs/<id>/`.
+`runs/<id>/scratch/`, and the wiki it downloaded and the last build are beside
+it in `runs/<id>/`.
 
 ## Commands
 
@@ -254,16 +254,18 @@ wiki itself, with `curl`, before it writes anything. See
 
 | Location | Contents |
 | --- | --- |
-| `.scratch/<id>/` | What the harness writes for a request: `plan.json`, `storyboard.json`, and its notes. Not committed. |
+| `runs/<id>/scratch/` | What the harness writes for a request: `plan.json`, `storyboard.json`, and its notes. Not committed. |
 | `runs/<id>/wiki_content/` | The request's copy of the wiki, downloaded by the harness when the request starts: `glossary.md`, `versions.md`, and one `vNN/` directory per PostgreSQL version. |
+| `runs/<id>/authored-inbox/`, `runs/<id>/reviews-inbox/` | Files the request receives from someone else: storyboards in `authored-inbox/`, reviews in `reviews-inbox/`. |
 | The rest of `runs/<id>/` | One request's build: `request.json` (its settings), `manifest.json` (stage records), `storyboard.json` (the imported storyboard with spoken text), `script.md`, audio, captions, slides, the draft MP4, and `quality-report.json`. It is kept after delivery so any stage can be repeated. |
 | `output/<id>/` | The delivery: `<page>.mp4`, `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `quality-report.json`, and `manifest.json`. |
 | `cache/` | Downloads and reusable results: narration units in `cache/narration/` and validated videos in `cache/videos/`. |
 | `.runtime/` | The local Python runtime, FFmpeg, eSpeak NG, Chromium, temporary files, and `environment-report.json`. |
 | `AGENTS.md`, `prompts/`, `schemas/` | The harness's instructions, how to write the plan and the storyboard, and their formats. |
 
-Deleting a request's directory under `runs/` is safe; its video can no longer
-be reused, and continuing the request downloads the wiki again.
+Deleting a request's directory under `runs/` deletes the request: its plan,
+storyboard, and notes go with its wiki copy and its build, and its video can no
+longer be reused. The delivered files in `output/<id>/` stay.
 
 ## How it works
 

@@ -2,7 +2,7 @@
 
 Input: the wiki page the user named, read in full from `runs/<id>/wiki_content/`, and
 `runs/<id>/wiki_content/glossary.md`.
-Output: `.scratch/<id>/plan.json`, in the format of `schemas/plan.schema.json`.
+Output: `runs/<id>/scratch/plan.json`, in the format of `schemas/plan.schema.json`.
 
 The plan is your own record of what the video will say, and a later session continues from it. No pgvideo
 command reads it.

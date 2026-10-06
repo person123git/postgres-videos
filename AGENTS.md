@@ -3,8 +3,8 @@
 Use the video workflow below only when the user explicitly requests a video or asks to continue an existing
 video request. For other tasks, do the requested work without starting a video.
 
-For all repository work, keep your working files in `.scratch/`, one subdirectory per task or request, as
-[Project layout](#project-layout) describes.
+For all repository work, keep your working files in `runs/<id>/scratch/`, one run directory per task or request,
+as [Project layout](#project-layout) describes.
 
 ## Read this first
 
@@ -93,9 +93,10 @@ own copy into its run directory when it starts, so a video is made from the wiki
 | `templates/` | The HTML slide template used for rendering. |
 | `assets/` | Static render assets, such as fonts. |
 | `pronunciation/` | Narration pronunciation overrides, per language. |
-| `authored-inbox/`, `reviews-inbox/` | Files kept from earlier requests, in older formats. Do not use them as examples. |
-| `.scratch/` | Your working files, one subdirectory per task or request. Not committed. |
-| `runs/` | One directory per request, `runs/<id>/`: the wiki you download into `runs/<id>/wiki_content/`, and the build files pgvideo writes. Not committed. |
+| `runs/` | One directory per task or request, `runs/<id>/`: the four folders below, and the build files pgvideo writes. Not committed. |
+| `runs/<id>/wiki_content/` | The wiki you download for the request. |
+| `runs/<id>/scratch/` | Your working files for the task or request. |
+| `runs/<id>/authored-inbox/`, `runs/<id>/reviews-inbox/` | Files the request receives from someone else: storyboards in `authored-inbox/`, reviews in `reviews-inbox/`. |
 | `output/` | Delivered files, `output/<id>/`. Not committed. |
 | `.venv/` | The project virtual environment created by `scripts/setup`. Not committed. |
 | `.runtime/` | The project-local Python runtime, tools, browsers, and `tmp/`. Not committed. |
@@ -104,24 +105,27 @@ own copy into its run directory when it starts, so a video is made from the wiki
 ## Working files and resuming
 
 Choose `<id>`, a short name for the request: lowercase letters, digits, and hyphens. Use the same `<id>` for the
-run directory, your working files, and the build. Keep everything you write for a video in `.scratch/<id>/`.
-These files are the whole state of a request, so a later session can continue from them.
+run directory and the build. Keep everything you write for a video in `runs/<id>/scratch/`. These files are the
+whole state of a request, so a later session can continue from them.
 
 | File | Format | Holds |
 | --- | --- | --- |
 | `runs/<id>/wiki_content/` | The wiki's Markdown files | The request's copy of the wiki, downloaded when the request started. |
-| `.scratch/<id>/plan.json` | [schemas/plan.schema.json](schemas/plan.schema.json) | The request (document, audience, detail, duration), the main answer, the claims in teaching order, the caveats, the time budgets, and the omissions. |
-| `.scratch/<id>/storyboard.json` | [schemas/storyboard.schema.json](schemas/storyboard.schema.json) | The video: every scene's screen and narration. |
-| The rest of `runs/<id>/`, and `output/<id>/` | Written by `build` | The narration, slides, and MP4 of the last build, and the delivered files. |
+| `runs/<id>/scratch/plan.json` | [schemas/plan.schema.json](schemas/plan.schema.json) | The request (document, audience, detail, duration), the main answer, the claims in teaching order, the caveats, the time budgets, and the omissions. |
+| `runs/<id>/scratch/storyboard.json` | [schemas/storyboard.schema.json](schemas/storyboard.schema.json) | The video: every scene's screen and narration. |
+| The build files in `runs/<id>/`, and `output/<id>/` | Written by `build` | The narration, slides, and MP4 of the last build, and the delivered files. |
+
+`build` writes its own `runs/<id>/storyboard.json`, the copy it imported. Your storyboard is the one in
+`scratch/`.
 
 To continue a request, look at what exists:
 
 | Found | Continue with |
 | --- | --- |
 | No `glossary.md` or no document in `runs/<id>/wiki_content/` | [Downloading the wiki](#1-download-the-wiki). |
-| The wiki, no `plan.json` | [Reading the document](#2-read-and-understand-the-document). |
-| `plan.json`, no `storyboard.json` | Read the document again, then [write the storyboard](#4-write-the-storyboard) from the plan. |
-| `storyboard.json`, no video in `output/<id>/` | [Build](#5-build-and-deliver). |
+| The wiki, no `scratch/plan.json` | [Reading the document](#2-read-and-understand-the-document). |
+| `scratch/plan.json`, no `scratch/storyboard.json` | Read the document again, then [write the storyboard](#4-write-the-storyboard) from the plan. |
+| `scratch/storyboard.json`, no video in `output/<id>/` | [Build](#5-build-and-deliver). |
 | A video in `output/<id>/` | Report the delivered paths, or apply the change the user asks for and build again. |
 
 A plan or a storyboard locates content; it does not replace the document. Read the document again before you
@@ -130,7 +134,7 @@ a storyboard, the page may have changed since they were written: read it again a
 before you build.
 
 `jq empty <file>` tells you whether a file is valid JSON. Other notes and drafts for a task also go in
-`.scratch/<id>/`.
+`runs/<id>/scratch/`.
 
 ## Tools
 
@@ -140,8 +144,8 @@ before you build.
   check again. Do not install host packages or bypass the sandbox.
 - Run your own helper scripts with `.venv/bin/python <script>`, never with the host `python` or `python3`. Do not
   install packages into `.venv/` yourself; `scripts/setup` owns it.
-- In `runs/<id>/`, only `wiki_content/` is yours. pgvideo owns the rest of `runs/` and all of `output/`. Read
-  them; never edit them.
+- In `runs/<id>/`, the folders `wiki_content/`, `scratch/`, `authored-inbox/`, and `reviews-inbox/` are yours.
+  pgvideo owns the rest of `runs/<id>/` and all of `output/`. Read them; never edit them.
 - pgvideo never calls a language model and never uses the network to build a video; Kokoro runs locally.
   Downloading the wiki is the one step that needs the network, and you do it.
 
@@ -200,7 +204,7 @@ audience, detail, and duration unchanged. If the source material cannot satisfy 
 set `feasibility.status` to `infeasible` with the reason, then stop and report it. Do not change the duration or
 remove necessary qualifications.
 
-Save the plan as `.scratch/<id>/plan.json`.
+Save the plan as `runs/<id>/scratch/plan.json`.
 
 ## 4. Write the storyboard
 
@@ -214,12 +218,12 @@ plan, and the document.
 - Follow the draft prompt's layout limits. Copy code, table rows, and glossary definitions exactly.
 - Keep all required qualifications. Budget the script against the plan.
 
-Save the storyboard as `.scratch/<id>/storyboard.json`.
+Save the storyboard as `runs/<id>/scratch/storyboard.json`.
 
 ## 5. Build and deliver
 
 ```sh
-scripts/pgvideo build --storyboard ".scratch/<id>/storyboard.json" --request "<id>" --json
+scripts/pgvideo build --storyboard "runs/<id>/scratch/storyboard.json" --request "<id>" --json
 ```
 
 Add `--voice`, `--language`, `--speed`, `--width`, `--height`, or `--output` only when the user asked for them.
