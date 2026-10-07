@@ -9,7 +9,8 @@
 # parts:          pieces of snake_case and CamelCase identifiers, matched
 #                 case-insensitively after the identifier is split.
 # abbreviations:  prose abbreviations, matched exactly.
-# units:          units after a number, such as `128MB` or `8 kB`.
+# units:          units after a number, such as `128MB` or `8 kB`. A term that
+#                 starts at the unit wins: `133 B-tree indexes` has no unit.
 #
 # Unlisted identifier pieces are read as words. A piece without a vowel, or an
 # all-capital piece of three letters or fewer, is spelled letter by letter.

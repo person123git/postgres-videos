@@ -142,7 +142,7 @@ class Pronunciation:
         if self._abbreviations:
             text = self._abbreviations.sub(lambda m: self.abbreviations[m.group(1)], text)
         if self._units:
-            text = self._units.sub(lambda m: f"{m.group(1)} {self._unit(m.group(1), m.group(2))}", text)
+            text = self._units.sub(self._quantity, text)
         # Identifiers written without backticks, such as pg_stat_activity in a heading.
         text = IDENTIFIER.sub(lambda m: " " + self.code(m.group(0)) + " ", text)
         if self._terms:
@@ -153,6 +153,12 @@ class Pronunciation:
             text = text.replace(symbol, spoken)
         text = WORD.sub(lambda m: self._capitals(m.group(0)), text)
         return UNSPEAKABLE.sub(" ", text)
+
+    def _quantity(self, match: re.Match) -> str:
+        """Speak a number and its unit. A term that starts at the unit wins: `133 B-tree indexes` has no unit."""
+        if self._terms and self._terms.match(match.string, match.start(2)):
+            return match.group(0)
+        return f"{match.group(1)} {self._unit(match.group(1), match.group(2))}"
 
     def _unit(self, number: str, unit: str) -> str:
         spoken = self.units[unit]

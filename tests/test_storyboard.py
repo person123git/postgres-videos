@@ -263,11 +263,13 @@ class ReadTests(unittest.TestCase):
 
 class SpeechTests(unittest.TestCase):
     def setUp(self):
-        self.speech = Pronunciation({"schema": 1, "terms": {"PostgreSQL": "Postgres Q L", "SQL": "S Q L"},
+        self.speech = Pronunciation({"schema": 1, "terms": {"PostgreSQL": "Postgres Q L", "SQL": "S Q L",
+                                                            "B-tree": "B tree"},
                                      "parts": {"pg": "P G", "pgstat": "P G stat", "cmd": "command", "str": "string",
                                                "num": "num"},
                                      "abbreviations": {"e.g.": "for example"}, "units": {"MB": "megabytes",
-                                                                                          "GB": "gigabytes"}},
+                                                                                          "GB": "gigabytes",
+                                                                                          "B": "bytes"}},
                                     words=frozenset({"has"}))
 
     def test_identifiers_code_and_prose_become_speakable(self):
@@ -286,6 +288,9 @@ class SpeechTests(unittest.TestCase):
             "`SELECT count(*) FROM pg_stat_activity`": "select count of star from P G stat activity",
             "It can exceed 1GB, e.g. with `128MB` slots.":
                 "It can exceed 1 gigabyte, for example with 128 megabytes slots.",
+            # A term that starts where a unit would is the term, not the unit.
+            "133 B-tree indexes take 133 B each, and 2 B-trees share 1GB.":
+                "133 B tree indexes take 133 bytes each, and 2 B trees share 1 gigabyte.",
             "PostgreSQL 18 and SQL, parser/planner/executor.": "Postgres Q L 18 and S Q L, parser, planner, executor.",
             "`-1` disables it": "minus 1 disables it",
         }
