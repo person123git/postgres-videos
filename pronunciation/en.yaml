@@ -73,6 +73,8 @@ terms:
   sysv: sys V
   pgstat: P G stat
   pgstatindex: P G stat index
+  pgstattuple: P G stat tuple
+  reltuples: rel tuples
   walsender: wall sender
   walreceiver: wall receiver
   autovacuum: auto-vacuum
@@ -80,14 +82,16 @@ terms:
   multixact: multi-ex-act
   shmem: shared mem
   fillfactor: fill factor
+  Fillfactor: Fill factor
   metapage: meta page
   relcache: rel cache
   indisvalid: ind is valid
   indisready: ind is ready
   indislive: ind is live
   PROC_IN_SAFE_IC: proc in safe I C
-  # A two-letter capital word inside a code span is spelled; this keeps `IS NULL` as words.
+  # A two-letter capital word inside a code span is spelled; these keep `IS NULL` and a `DO` block as words.
   IS: is
+  DO: do
 
 parts:
   pg: P G
@@ -107,6 +111,7 @@ parts:
   shmem: shared mem
   cmd: command
   avg: average
+  pct: percent
   str: string
   buf: buffer
   bufs: buffers
