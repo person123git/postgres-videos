@@ -24,6 +24,8 @@ terms:
   psql: P-S-Q-L
   SQL: S-Q-L
   GUC: G U C
+  # The plural needs its own form: Kokoro reads "G U Cs" as "G U C S".
+  GUCs: G U C's
   WAL: wall
   MVCC: M V C C
   OID: O I D
