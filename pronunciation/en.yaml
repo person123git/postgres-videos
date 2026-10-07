@@ -53,6 +53,9 @@ terms:
   FDW: F D W
   LLVM: L L V M
   B-tree: B tree
+  # Kokoro spells the mixed-case names of these index access methods.
+  GiST: gist
+  SP-GiST: S P gist
   RelOptInfo: rel opt info
   RelOptInfos: rel opt infos
   PlannerInfo: planner info
@@ -92,11 +95,23 @@ terms:
   indisready: ind is ready
   indislive: ind is live
   PROC_IN_SAFE_IC: proc in safe I C
-  # A two-letter capital word inside a code span is spelled; these keep `IS NULL` and a `DO` block as words.
+  # A two-letter capital word inside a code span is spelled; these keep `IS NULL`, a `DO` block, `NOT IN`,
+  # `JOIN ... ON`, `GROUP BY`, `CREATE TABLE AS`, `COPY ... TO`, `FOR UPDATE OF` and `IF NOT EXISTS` as words.
   IS: is
   DO: do
+  IN: in
+  "ON": "on"
+  BY: by
+  AS: as
+  OR: or
+  TO: to
+  OF: of
+  IF: if
+  AT: at
+  "NO": "no"
 
 parts:
+  geqo: G E Q O
   pg: P G
   pgstat: P G stat
   pgss: P G S S
