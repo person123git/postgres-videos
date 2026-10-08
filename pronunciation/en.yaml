@@ -53,6 +53,10 @@ terms:
   FDW: F D W
   LLVM: L L V M
   B-tree: B tree
+  # Expand the abbreviated EXPLAIN node name when spoken.
+  Seq Scan: sequential scan
+  seq scan: sequential scan
+  SEQ SCAN: sequential scan
   # Kokoro spells the mixed-case names of these index access methods.
   GiST: gist
   SP-GiST: S P gist
@@ -136,6 +140,8 @@ parts:
   ptr: pointer
   ctx: context
   stmt: statement
+  seq: sequential
+  seqscan: sequential scan
   len: len
   cliplen: clip len
   mbcliplen: M B clip len
