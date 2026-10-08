@@ -53,10 +53,13 @@ terms:
   FDW: F D W
   LLVM: L L V M
   B-tree: B tree
-  # Expand the abbreviated EXPLAIN node name when spoken.
+  # Expand abbreviated EXPLAIN labels when spoken.
   Seq Scan: sequential scan
   seq scan: sequential scan
   SEQ SCAN: sequential scan
+  Index Cond: Index Condition
+  index cond: index condition
+  INDEX COND: index condition
   # Kokoro spells the mixed-case names of these index access methods.
   GiST: gist
   SP-GiST: S P gist
