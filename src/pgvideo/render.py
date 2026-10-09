@@ -1,4 +1,4 @@
-"""Render the storyboard's scenes as slides and assemble a frame-aligned draft MP4."""
+"""Render the storyboard's scenes as slides and assemble a frame-aligned draft WebM."""
 
 from __future__ import annotations
 
@@ -156,11 +156,11 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
     return results
 
 
-def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: int = 192) -> dict:
-    """Build a draft MP4; validation checks it before delivery."""
+def create_render(root: Path, run_dir: Path, *, crf: int = 40, audio_bitrate: int = 192) -> dict:
+    """Build a draft WebM; validation checks it before delivery."""
     # libopus accepts at most 256 kb/s for one channel.
-    if not 0 <= crf <= 51 or not 32 <= audio_bitrate <= 256:
-        raise ValueError("CRF must be 0–51 and audio bitrate must be 32–256 kb/s")
+    if not 0 <= crf <= 63 or not 32 <= audio_bitrate <= 256:
+        raise ValueError("CRF must be 0–63 and audio bitrate must be 32–256 kb/s")
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     try:
@@ -195,14 +195,14 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: in
         references = _references(storyboard)
         write_atomic(root, run_dir.relative_to(root) / "references.md", references.encode(), label="Request")
         ffmpeg = root / ".runtime/bin/ffmpeg"
-        draft = render_dir / "draft.mp4"
+        draft = render_dir / "draft.webm"
         audio = run_dir / "narration/master.wav"
         _run([str(ffmpeg), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
               "-safe", "0", "-f", "concat", "-i", str(concat), "-i", str(audio),
               "-map", "0:v:0", "-map", "1:a:0", "-vf", "fps=30", "-frames:v", str(timeline["total_frames"]),
-              "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-pix_fmt", "yuv420p",
+              "-c:v", "libsvtav1", "-preset", "8", "-crf", str(crf), "-pix_fmt", "yuv420p",
               "-r", "30", "-c:a", "libopus", "-b:a", f"{audio_bitrate}k", "-ar", "48000", "-ac", "1",
-              "-movflags", "+faststart", str(draft)])
+              "-f", "webm", "-cues_to_front", "1", str(draft)])
         probe = json.loads(_run([str(root / ".runtime/bin/ffprobe"), "-v", "error", "-count_frames",
                                  "-show_streams", "-show_format", "-of", "json", str(draft)]).stdout)
         streams = {s["codec_type"]: s for s in probe["streams"]}
@@ -210,7 +210,7 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 20, audio_bitrate: in
         if (video["codec_name"], video["pix_fmt"], video["width"], video["height"],
             video["r_frame_rate"], int(video.get("nb_read_frames", -1)), sound["codec_name"],
             sound["sample_rate"], sound["channels"]) != (
-                "h264", "yuv420p", width, height, "30/1", timeline["total_frames"],
+                "av1", "yuv420p", width, height, "30/1", timeline["total_frames"],
                 "opus", "48000", 1):
             raise ValueError("Encoded streams do not match the requested format or frame count")
         record = {"status": "passed", "created_at": datetime.now(timezone.utc).isoformat(),

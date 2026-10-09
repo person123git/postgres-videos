@@ -21,6 +21,11 @@ def save(path, value):
 
 
 class RenderTests(unittest.TestCase):
+    def test_av1_crf_range_rejects_out_of_range_values_before_rendering(self):
+        for crf in (-1, 64):
+            with self.subTest(crf=crf), self.assertRaisesRegex(ValueError, "CRF must be 0–63"):
+                create_render(ROOT, ROOT / "runs/unused", crf=crf)
+
     def test_two_scenes_have_exact_frame_count_and_audio(self):
         with tempfile.TemporaryDirectory(prefix="pgvideo-render-test-", dir=ROOT / ".runtime/tmp") as temporary:
             run = Path(temporary)

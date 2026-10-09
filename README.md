@@ -1,10 +1,10 @@
 # pgvideo
 
-pgvideo turns a storyboard into a narrated MP4. A storyboard is one JSON file:
+pgvideo turns a storyboard into a narrated WebM. A storyboard is one JSON file:
 the scenes of a video, with what each screen shows and what is said over it.
 `scripts/pgvideo build` narrates it with a local Kokoro model, times captions
 and scenes from the measured audio, renders the slides, and encodes, checks,
-and delivers the MP4. A later build with exactly the same inputs reuses the
+and delivers the WebM. A later build with exactly the same inputs reuses the
 video.
 
 The videos explain pages of
@@ -60,7 +60,7 @@ scripts/pgvideo build --storyboard runs/<id>/scratch/storyboard.json --request <
 It finishes by reporting the delivered files:
 
 ```text
-output/<id>/track-activity-query-size.mp4
+output/<id>/track-activity-query-size.webm
 output/<id>/transcript.md, captions.srt, captions.vtt, references.md,
   quality-report.json, manifest.json
 ```
@@ -81,7 +81,7 @@ Every command runs through `scripts/pgvideo`.
 | `timing --request <id>` | Repeats timing, then rendering and the checks. |
 | `render --request <id> [--crf] [--audio-bitrate]` | Repeats rendering and the checks. |
 | `validate --request <id>` | Repeats the media checks and the delivery. |
-| `doctor [--sample]` | Checks the local environment; `--sample` also makes a short offline narration, slide, and MP4. |
+| `doctor [--sample]` | Checks the local environment; `--sample` also makes a short offline narration, slide, and WebM. |
 | `test [--pattern <glob>]` | Runs the test suite in the offline sandbox. |
 
 ### `build` options
@@ -93,7 +93,7 @@ Every command runs through `scripts/pgvideo`.
 | `--voice`, `--language`, `--speed` | `af_heart`, `a`, `1.0` | Kokoro voice, language code, and speaking speed. |
 | `--width`, `--height` | `1920`, `1080` | Video size; both must be even. |
 | `--output <dir>` | `output` | Output directory inside the project. |
-| `--no-reuse` | off | Builds the narration and MP4 even when a validated video with the same inputs exists. |
+| `--no-reuse` | off | Builds the narration and WebM even when a validated video with the same inputs exists. |
 | `--json` | off | Prints one result as JSON on standard output; progress goes to standard error. |
 
 A request remembers the options it was built with, so a rebuild needs only the
@@ -106,7 +106,7 @@ With `--json`, `build` prints:
 ```json
 {"request_id": "…", "stage": "validation", "status": "completed", "issues": [],
  "duration_seconds": 184.3,
- "delivery": {"directory": "…/output/<id>", "video": "…/output/<id>/<page>.mp4",
+ "delivery": {"directory": "…/output/<id>", "video": "…/output/<id>/<page>.webm",
               "files": [{"path": "…", "sha256": "…"}]},
  "message": "Delivered …"}
 ```
@@ -212,7 +212,7 @@ Unit IDs are listed in `runs/<id>/narration/audio-map.json`.
 ### Re-encode, deliver again, or build instead of reusing
 
 ```sh
-scripts/pgvideo render --request <id> --crf 18
+scripts/pgvideo render --request <id> --crf 35
 scripts/pgvideo validate --request <id>
 scripts/pgvideo build --request <id> --no-reuse
 ```
@@ -221,7 +221,7 @@ scripts/pgvideo build --request <id> --no-reuse
 
 ```sh
 scripts/pgvideo doctor             # every check; runs before each command anyway
-scripts/pgvideo doctor --sample    # also a short offline narration, slide, and MP4
+scripts/pgvideo doctor --sample    # also a short offline narration, slide, and WebM
 scripts/pgvideo test               # unit and integration tests
 ```
 
@@ -257,8 +257,8 @@ wiki itself, with `curl`, before it writes anything. See
 | `runs/<id>/scratch/` | What the harness writes for a request: `plan.json`, `storyboard.json`, and its notes. Not committed. |
 | `runs/<id>/wiki_content/` | The request's copy of the wiki, downloaded by the harness when the request starts: `glossary.md`, `versions.md`, and one `vNN/` directory per PostgreSQL version. |
 | `runs/<id>/authored-inbox/`, `runs/<id>/reviews-inbox/` | Files the request receives from someone else: storyboards in `authored-inbox/`, reviews in `reviews-inbox/`. |
-| The rest of `runs/<id>/` | One request's build: `request.json` (its settings), `manifest.json` (stage records), `storyboard.json` (the imported storyboard with spoken text), `script.md`, audio, captions, slides, the draft MP4, and `quality-report.json`. It is kept after delivery so any stage can be repeated. |
-| `output/<id>/` | The delivery: `<page>.mp4`, `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `quality-report.json`, and `manifest.json`. |
+| The rest of `runs/<id>/` | One request's build: `request.json` (its settings), `manifest.json` (stage records), `storyboard.json` (the imported storyboard with spoken text), `script.md`, audio, captions, slides, the draft WebM, and `quality-report.json`. It is kept after delivery so any stage can be repeated. |
+| `output/<id>/` | The delivery: `<page>.webm`, `transcript.md`, `captions.srt`, `captions.vtt`, `references.md`, `quality-report.json`, and `manifest.json`. |
 | `cache/` | Downloads and reusable results: narration units in `cache/narration/` and validated videos in `cache/videos/`. |
 | `.runtime/` | The local Python runtime, FFmpeg, eSpeak NG, Chromium, temporary files, and `environment-report.json`. |
 | `AGENTS.md`, `prompts/`, `schemas/` | The harness's instructions, how to write the plan and the storyboard, and their formats. |
@@ -357,8 +357,8 @@ deny: writing `/tmp`, reading `/etc/passwd`, running `/usr/bin/true`, and, when
 offline, connecting to a TEST-NET address.
 
 `doctor --sample` runs offline. It synthesizes a Kokoro WAV and renders a
-1920 × 1080 slide with headless Chromium, then encodes an H.264/Opus MP4 with
-`+faststart` and verifies it with ffprobe and a full decode. It confirms
+1920 × 1080 slide with headless Chromium, then encodes an AV1/Opus WebM with
+its Cues before the first Cluster and verifies it with ffprobe and a full decode. It confirms
 through the DevTools protocol that the slide text used only the fonts in
 `assets/fonts/`, and that every native library mapped by the sample came from
 the project or the system library directories. Outputs stay in `.runtime/tmp/`.
@@ -454,20 +454,34 @@ without resynthesizing audio:
 After timing, Playwright renders each storyboard scene to a PNG using the
 bundled fonts and a reusable slide template. It rejects overflow, missing
 images, and fonts outside the bundle. The renderer holds each PNG for the
-scene's measured frame count, then encodes `render/draft.mp4` with H.264 video
+scene's measured frame count, then encodes `render/draft.webm` with AV1 video
 at 30 fps and Opus mono audio at 48 kHz. `render.json` records the input and
 artifact hashes, and `references.md` lists the page and each scene's citations.
 The checks fully decode the draft, verify its streams, timing, caption
-coverage, spoken units, silence, and loudness, and then copy the MP4 and its
+coverage, spoken units, silence, and loudness, and then copy the WebM and its
 accompanying files to `output/<id>/`. The run's `quality-report.json` records
 the measurements and delivery hashes. These are checks of the media; none of
 them looks at what the video says.
 
+Video uses libsvtav1 preset 8, CRF 40, and `yuv420p`, with WebM Cues moved before
+the first Cluster for streaming. `render --crf` accepts 0–63; lower values retain
+more detail. The defaults were compared on six seconds of three 1080p slides
+and narration from a real build: VMAF 97.28, 348 KB, and 1.12 seconds to encode,
+versus 96.06, 314 KB, and 0.66 seconds with the previous x264 veryfast/CRF 20.
+Text was visually checked against the source slides. These measurements describe
+that sample; AV1 does not guarantee smaller files or faster encoding.
+Validation reads each WebM track's `DURATION` tag when ffprobe omits stream
+duration, retaining the same frame-count and audio/video end-time limits.
+
 The audio is encoded with libopus at 192 kb/s by default. A lower bitrate adds
 more to the narration master's true peak (about 0.1 dB at 192 kb/s; 0.5 to
 0.8 dB at 128 kb/s and below), toward the true-peak limit that the checks
-enforce. Opus in MP4 plays in Chrome, Edge, and Firefox. Apple platforms decode
-it from iOS 17; earlier versions play the video without sound.
+enforce. AV1 with Opus in WebM plays in current desktop Chrome, Edge, and Firefox
+([codec support](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Formats/Video_codecs)).
+Safari requires a device with an AV1 hardware decoder
+([Safari 17.0](https://webkit.org/blog/14445/webkit-features-in-safari-17-0/));
+WebM support on iOS, iPadOS, and visionOS starts with Safari 17.4
+([WebKit release notes](https://webkit.org/blog/15063/webkit-features-in-safari-17-4/)).
 
 When a stage runs again, the manifest drops the records of every later stage,
 including an earlier validation, so it never describes media that was built
@@ -494,15 +508,15 @@ key is the SHA-256 of every input that decides the video:
 
 Validation registers each delivered video as
 `cache/videos/<key>/<request-id>.json`, with the SHA-256 of its audio map,
-render record, unit WAVs, masters, slides, MP4, and references. It registers a
+render record, unit WAVs, masters, slides, WebM, and references. It registers a
 video only when the narration, timing, and render stages ran with the same
 tools and code as the validation. A lookup verifies every listed file in the
-earlier request's run directory, copies the narration and MP4 into the new
+earlier request's run directory, copies the narration and WebM into the new
 request, and then runs the new request's own timing and validation, so the
 delivered video is checked again. A request that is built again without a
 change finds its own video and copies nothing. An entry whose files are missing
 or changed is reported, skipped, and removed from the index. If the copied
-narration or MP4 cannot be used, that stage is built instead. A lookup never
+narration or WebM cannot be used, that stage is built instead. A lookup never
 creates, changes, or delivers another request.
 
 The manifest's `reuse` record keeps the key, its components, the lookup's
@@ -547,7 +561,7 @@ directories used to simulate escaping paths.
   must stay inside the project.
 - **Integration** (`test_integration.py`) narrates a three-scene storyboard
   with the real Kokoro model and follows every sample from its chunks to the
-  delivered MP4.
+  delivered WebM.
 
 ## License
 

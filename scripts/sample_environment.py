@@ -1,4 +1,4 @@
-"""Offline narration, slide, and MP4 smoke check; outputs stay in .runtime/tmp.
+"""Offline narration, slide, and WebM smoke check; outputs stay in .runtime/tmp.
 
 Doctor runs this inside the offline sandbox and records the JSON line it prints.
 """
@@ -19,6 +19,7 @@ import yaml
 from markdown_it import MarkdownIt
 from playwright.sync_api import sync_playwright
 from pgvideo.assets import local_kokoro
+from pgvideo.cli import CRF
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMP = ROOT / ".runtime" / "tmp"
@@ -99,45 +100,70 @@ def rendered_fonts(session) -> list[str]:
     return sorted(family for family, _ in used)
 
 
-def mp4_boxes(path: Path) -> list[str]:
-    boxes = []
+def webm_elements(path: Path) -> list[int]:
+    """Read Segment child IDs through the first Cluster, skipping element payloads."""
+    def vint(stream, *, identifier=False):
+        first = stream.read(1)
+        if not first or not first[0]:
+            raise RuntimeError("truncated or invalid WebM element header")
+        width = 9 - first[0].bit_length()
+        if identifier and width > 4:
+            raise RuntimeError("invalid WebM element ID")
+        rest = stream.read(width - 1)
+        if len(rest) != width - 1:
+            raise RuntimeError("truncated WebM element header")
+        value = int.from_bytes(first + rest, "big")
+        if identifier:
+            return value
+        value &= (1 << (7 * width)) - 1
+        return None if value == (1 << (7 * width)) - 1 else value
+
+    elements = []
+    end = path.stat().st_size
     with path.open("rb") as stream:
-        while header := stream.read(8):
-            size, kind = struct.unpack(">I4s", header)
-            if size == 1:
-                size = struct.unpack(">Q", stream.read(8))[0] - 8
-            boxes.append(kind.decode("latin-1"))
-            if size == 0:
-                break
-            stream.seek(size - 8, 1)
-    return boxes
+        in_segment = False
+        while stream.tell() < end:
+            kind, size = vint(stream, identifier=True), vint(stream)
+            if not in_segment and kind == 0x18538067:  # Segment
+                in_segment = True
+                if size is not None:
+                    end = min(end, stream.tell() + size)
+                continue
+            if in_segment:
+                elements.append(kind)
+                if kind == 0x1F43B675:  # Cluster
+                    return elements
+            if size is None or stream.tell() + size > end:
+                raise RuntimeError("invalid WebM element size")
+            stream.seek(size, 1)
+    raise RuntimeError("sample WebM has no Cluster")
 
 
 def encode(audio: Path, image: Path) -> dict:
-    video = TEMP / "sample-video.mp4"
+    video = TEMP / "sample-video.webm"
     subprocess.run([str(FFMPEG), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                     "-loop", "1", "-framerate", "30", "-i", str(image), "-i", str(audio),
                     "-map", "0:v", "-map", "1:a", "-shortest",
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30",
+                    "-c:v", "libsvtav1", "-preset", "8", "-crf", str(CRF), "-pix_fmt", "yuv420p", "-r", "30",
                     "-af", "loudnorm=I=-16:TP=-1.5,aresample=48000",
                     "-c:a", "libopus", "-b:a", "192k", "-ar", "48000", "-ac", "1",
-                    "-movflags", "+faststart", str(video)], check=True)
+                    "-f", "webm", "-cues_to_front", "1", str(video)], check=True)
     probe = json.loads(subprocess.run([str(FFPROBE), "-v", "error", "-show_streams", "-show_format", "-of", "json",
                                        str(video)], check=True, capture_output=True, text=True).stdout)
     streams = {stream["codec_type"]: stream for stream in probe["streams"]}
     found = (streams["video"]["codec_name"], streams["video"]["pix_fmt"], streams["video"]["width"],
              streams["video"]["height"], streams["video"]["r_frame_rate"], streams["audio"]["codec_name"],
              streams["audio"]["sample_rate"], streams["audio"]["channels"])
-    if found != ("h264", "yuv420p", 1920, 1080, "30/1", "opus", "48000", 1):
-        raise RuntimeError(f"sample MP4 has unexpected streams: {found}")
-    boxes = mp4_boxes(video)
-    if "moov" not in boxes or "mdat" not in boxes or boxes.index("moov") > boxes.index("mdat"):
-        raise RuntimeError(f"sample MP4 is not optimized for streaming: {boxes}")
+    if found != ("av1", "yuv420p", 1920, 1080, "30/1", "opus", "48000", 1):
+        raise RuntimeError(f"sample WebM has unexpected streams: {found}")
+    elements = webm_elements(video)
+    if 0x1C53BB6B not in elements[:-1]:  # Cues must precede the first Cluster.
+        raise RuntimeError(f"sample WebM is not optimized for streaming: {elements}")
     decoded = subprocess.run([str(FFMPEG), "-v", "error", "-nostdin", "-i", str(video), "-f", "null", "-"],
                              check=True, capture_output=True, text=True)
     if decoded.stderr.strip():
-        raise RuntimeError(f"sample MP4 failed to decode cleanly: {decoded.stderr.strip()}")
-    return {"file": str(video.relative_to(ROOT)), "video": "h264 yuv420p 1920x1080 30 fps",
+        raise RuntimeError(f"sample WebM failed to decode cleanly: {decoded.stderr.strip()}")
+    return {"file": str(video.relative_to(ROOT)), "video": "av1 yuv420p 1920x1080 30 fps",
             "audio": "opus 48 kHz mono", "duration": float(probe["format"]["duration"])}
 
 

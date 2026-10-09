@@ -5,7 +5,7 @@ A video's key covers the imported storyboard without its request-specific fields
 dictionary, the voice, speed, and loudness settings, the Kokoro assets, the
 render settings, and the SHA-256 of the locks, template, fonts, and media code.
 Validation registers each video as cache/videos/<key>/<request-id>.json. When a
-later storyboard has the same key, the registered narration and MP4 are verified,
+later storyboard has the same key, the registered narration and WebM are verified,
 copied into the new request, and checked again by that request's own timing and
 validation stages.
 """
@@ -40,8 +40,8 @@ REQUEST_FIELDS = ("request_id", "created_at", "source")
 # they are left out so the same scenes keep one digest and one video.
 ESTIMATE_FIELDS = ("status", "settings", "estimate", "counts", "issues")
 MEDIA_FILE = re.compile(r"narration/(?:units/[A-Za-z0-9][A-Za-z0-9._-]*\.wav|master(?:-raw)?\.wav)"
-                        r"|render/(?:slides/\d{3,4}\.(?:png|html)|slides\.ffconcat|draft\.mp4)|references\.md")
-REQUIRED_FILES = ("narration/master.wav", "narration/master-raw.wav", "render/draft.mp4", "references.md")
+                        r"|render/(?:slides/\d{3,4}\.(?:png|html)|slides\.ffconcat|draft\.webm)|references\.md")
+REQUIRED_FILES = ("narration/master.wav", "narration/master-raw.wav", "render/draft.webm", "references.md")
 
 
 class ReuseError(ValueError):
@@ -91,7 +91,7 @@ def _json_bytes(value: dict) -> bytes:
 
 
 def tools(root: Path) -> dict:
-    """Return the SHA-256 of each file that turns a storyboard into audio, captions, slides, and the MP4.
+    """Return the SHA-256 of each file that turns a storyboard into audio, captions, slides, and the WebM.
 
     tools.lock and requirements.lock stand for the Kokoro assets, eSpeak NG, FFmpeg,
     Chromium, fonts, and Python packages, which doctor verifies against them before
@@ -303,7 +303,7 @@ def reuse_narration(root: Path, run_dir: Path, video: Video) -> dict:
 
 
 def reuse_render(root: Path, run_dir: Path, video: Video) -> dict:
-    """Copy a registered video's slides and MP4 into this request after its own timing passed."""
+    """Copy a registered video's slides and WebM into this request after its own timing passed."""
     from .render import publish
 
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))

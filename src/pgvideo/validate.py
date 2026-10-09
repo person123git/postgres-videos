@@ -45,6 +45,25 @@ def _loudness(ffmpeg: Path, video: Path) -> dict:
             "true_peak_dbtp": float(values["input_tp"])}
 
 
+def _stream_end(stream: dict) -> float:
+    """Read an end time without substituting the container's duration for either track."""
+    if "duration" in stream:
+        end = float(stream.get("start_time", 0)) + float(stream["duration"])
+    else:
+        # FFmpeg's Matroska muxer writes the last timestamp + packet duration
+        # in DURATION, already relative to the container origin.
+        tag = stream.get("tags", {}).get("DURATION", "")
+        if not re.fullmatch(r"\d+:\d{2}:\d{2}(?:\.\d+)?", tag):
+            raise ValueError("Encoded stream has no valid duration or DURATION tag")
+        hours, minutes, seconds = tag.split(":")
+        if int(minutes) >= 60 or float(seconds) >= 60:
+            raise ValueError("Encoded stream has an invalid DURATION tag")
+        end = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    if not math.isfinite(end) or end <= 0:
+        raise ValueError("Encoded stream end time must be finite and positive")
+    return end
+
+
 def _captions(run_dir: Path, timeline: dict, audio_map: dict, storyboard: dict) -> dict:
     scenes, cues = timeline["scenes"], timeline["captions"]
     if not scenes or [s["id"] for s in scenes] != [s["id"] for s in storyboard["scenes"]]:
@@ -89,9 +108,9 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         timeline = json.loads((run_dir / "timeline.json").read_text())
         audio_map = json.loads((run_dir / "narration/audio-map.json").read_text())
         storyboard = json.loads((run_dir / "storyboard.json").read_text())
-        draft = run_dir / "render/draft.mp4"
+        draft = run_dir / "render/draft.webm"
         checks = (("render.json", manifest["render"]["sha256"]),
-                  ("render/draft.mp4", manifest["render"]["draft_sha256"]),
+                  ("render/draft.webm", manifest["render"]["draft_sha256"]),
                   ("timeline.json", manifest["timing"]["sha256"]),
                   ("narration/audio-map.json", manifest["narration"]["sha256"]),
                   ("storyboard.json", manifest["script"]["sha256"]),
@@ -111,25 +130,25 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         video = [s for s in streams if s["codec_type"] == "video"]
         sound = [s for s in streams if s["codec_type"] == "audio"]
         if len(streams) != 2 or len(video) != 1 or len(sound) != 1:
-            raise ValueError("MP4 must have exactly one video and one audio stream")
+            raise ValueError("WebM must have exactly one video and one audio stream")
         video, sound = video[0], sound[0]
         width, height = request["settings"]["width"], request["settings"]["height"]
-        if ("mp4" not in probe["format"]["format_name"].split(",") or
+        if ("webm" not in probe["format"]["format_name"].split(",") or
                 (video["codec_name"], video["pix_fmt"], video["width"], video["height"],
                  video["avg_frame_rate"], int(video.get("nb_read_frames", -1))) !=
-                ("h264", "yuv420p", width, height, "30/1", timeline["total_frames"]) or
+                ("av1", "yuv420p", width, height, "30/1", timeline["total_frames"]) or
                 (sound["codec_name"], sound["sample_rate"], sound["channels"]) !=
                 ("opus", "48000", 1)):
-            raise ValueError("MP4 container, codecs, dimensions, rate, or frame count differ from the request")
-        video_end = float(video["start_time"]) + float(video["duration"])
-        audio_end = float(sound["start_time"]) + float(sound["duration"])
+            raise ValueError("WebM container, codecs, dimensions, rate, or frame count differ from the request")
+        video_end = _stream_end(video)
+        audio_end = _stream_end(sound)
         duration = float(probe["format"]["duration"])
         if (abs(video_end - audio_end) > 0.100 or
                 abs(video_end - timeline["video_duration_seconds"]) > 0.050 or
                 abs(audio_end - timeline["audio_duration_seconds"]) > 0.100 or
                 abs(duration - max(video_end, audio_end)) > 0.050):
             raise ValueError("Audio, video, and timeline end times differ beyond 100 ms")
-        report["checks"]["media"] = {"container": "mp4", "video_codec": "h264", "audio_codec": "opus",
+        report["checks"]["media"] = {"container": "webm", "video_codec": "av1", "audio_codec": "opus",
                                       "width": width, "height": height, "fps": 30,
                                       "frames": timeline["total_frames"], "duration_seconds": duration,
                                       "video_end_seconds": video_end, "audio_end_seconds": audio_end,
@@ -184,7 +203,7 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         destination = project_directory(root, output_base / run_dir.name, label="Output")
         destination.mkdir(parents=True, exist_ok=True)
         slug = re.sub(r"[^a-z0-9]+", "-", Path(storyboard["document"]["path"]).stem.lower()).strip("-") or "video"
-        files = {f"{slug}.mp4": draft, "transcript.md": run_dir / "script.md",
+        files = {f"{slug}.webm": draft, "transcript.md": run_dir / "script.md",
                  "captions.srt": run_dir / "captions.srt", "captions.vtt": run_dir / "captions.vtt",
                  "references.md": run_dir / "references.md"}
         for name, source in files.items():
@@ -210,7 +229,7 @@ def validate_video(root: Path, run_dir: Path) -> dict:
         manifest["status"] = "completed"
         manifest["validation"] = {"status": report["status"], "record": "quality-report.json",
                                   "sha256": _sha(run_dir / "quality-report.json"),
-                                  "output": str(destination.relative_to(root)), "video": f"{slug}.mp4",
+                                  "output": str(destination.relative_to(root)), "video": f"{slug}.webm",
                                   "duration_seconds": duration}
         manifest["reuse"] = register(root, run_dir, manifest, storyboard=storyboard, audio_map=audio_map,
                                      render=render)

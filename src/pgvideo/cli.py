@@ -2,7 +2,7 @@
 
 pgvideo is a media utility. Whoever makes a video writes its storyboard
 (schemas/storyboard.schema.json); `build` reads that file, synthesizes the
-narration with the local Kokoro model, times it, renders the slides and the MP4,
+narration with the local Kokoro model, times it, renders the slides and the WebM,
 checks the media, and delivers the files. `narrate`, `timing`, `render`, and
 `validate` repeat one of those stages. No command reads the wiki, judges what a
 storyboard says, or calls a language model.
@@ -29,7 +29,7 @@ NEEDS_REVIEW = 3
 # Narration and encoding settings that build uses; a reuse lookup plans with them.
 # At 192 kb/s libopus adds about 0.1 dB to the narration master's true peak; at 64 kb/s it adds about 0.8 dB,
 # nearly all of the headroom under validation's limit.
-LUFS, TRUE_PEAK, CRF, AUDIO_BITRATE = -16.0, -1.5, 20, 192
+LUFS, TRUE_PEAK, CRF, AUDIO_BITRATE = -16.0, -1.5, 40, 192
 DEFAULTS = {"voice": "af_heart", "language": "a", "speed": 1.0, "width": 1920, "height": 1080, "output": "output"}
 # A result folds more issues of one severity and code than this into a single issue.
 ISSUE_GROUP_LIMIT = 3
@@ -78,7 +78,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--output", type=Path,
                        help=f"output directory inside the project (default: {DEFAULTS['output']})")
     build.add_argument("--no-reuse", action="store_true",
-                       help="build the narration and MP4 even when a validated video with the same inputs exists; "
+                       help="build the narration and WebM even when a validated video with the same inputs exists; "
                             "it is registered for reuse afterwards")
     build.add_argument("--json", action="store_true", help=JSON_HELP)
 
@@ -93,8 +93,8 @@ def parser() -> argparse.ArgumentParser:
     narrate.add_argument("--refresh-unit", action="append", default=[],
                          help="resynthesize one unit or sentence ID, even if it is cached; repeat as needed")
     stage("timing", "rebuild scene timing and captions from the narration, then continue")
-    render = stage("render", "render, check, and deliver the MP4 from the timing")
-    render.add_argument("--crf", type=int, default=CRF, help="H.264 constant rate factor (default: 20)")
+    render = stage("render", "render, check, and deliver the WebM from the timing")
+    render.add_argument("--crf", type=int, default=CRF, help="SVT-AV1 constant rate factor, 0–63 (default: 40)")
     render.add_argument("--audio-bitrate", type=int, default=AUDIO_BITRATE, help="Opus bitrate in kb/s (default: 192)")
     stage("validate", "check and deliver an existing rendered request")
     return command
@@ -281,7 +281,7 @@ def _build(root: Path, run_dir: Path, *, reuse: bool) -> int:
     if video is None:
         reason = {"disabled": "--no-reuse was given", "not_found": "no validated video has the same inputs",
                   "unavailable": f"the lookup failed: {lookup.get('reason')}"}[lookup["status"]]
-        print(f"Reuse: building the narration and MP4{key}; {reason}.")
+        print(f"Reuse: building the narration and WebM{key}; {reason}.")
         return _narrate(root, run_dir)
     print(f"Reuse: request {video.request_id} has a validated video with the same inputs{key}.")
     return _reuse_narration(root, run_dir, video)
@@ -324,7 +324,7 @@ def _narrate(root: Path, run_dir: Path, *, lufs: float = LUFS, true_peak: float 
 
 
 def _timing(root: Path, run_dir: Path, *, video=None) -> int:
-    """Time the narration, then render the MP4 or reuse the one registered for `video`."""
+    """Time the narration, then render the WebM or reuse the one registered for `video`."""
     from .timing import create_timing
 
     try:
@@ -351,7 +351,7 @@ def _reuse_render(root: Path, run_dir: Path, video) -> int:
     try:
         result = reuse_render(root, run_dir, video)
     except (ValueError, OSError, KeyError, TypeError) as error:
-        print(f"pgvideo: cannot reuse the MP4 of request {video.request_id} ({error}); rendering it.",
+        print(f"pgvideo: cannot reuse the WebM of request {video.request_id} ({error}); rendering it.",
               file=sys.stderr)
         return _render(root, run_dir)
     _print_render(run_dir, result)
@@ -360,7 +360,7 @@ def _reuse_render(root: Path, run_dir: Path, video) -> int:
 
 def _print_render(run_dir: Path, result: dict) -> None:
     source = f", reused from request {result['reused_from']}" if result.get("reused_from") else ""
-    print(f"Draft MP4: {run_dir / result['draft']} ({result['frames']} frames{source})")
+    print(f"Draft WebM: {run_dir / result['draft']} ({result['frames']} frames{source})")
     print(f"Render record: {run_dir / result['record']}")
 
 

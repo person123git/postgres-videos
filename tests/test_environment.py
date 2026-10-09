@@ -22,6 +22,10 @@ _spec = importlib.util.spec_from_file_location("pgvideo_environment", ROOT / "sc
 environment = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(environment)
 
+_sample_spec = importlib.util.spec_from_file_location("pgvideo_sample", ROOT / "scripts/sample_environment.py")
+sample = importlib.util.module_from_spec(_sample_spec)
+_sample_spec.loader.exec_module(sample)
+
 
 def fixture_directory(test: unittest.TestCase) -> Path:
     temporary = tempfile.TemporaryDirectory(prefix="pgvideo-test-", dir=ROOT / ".runtime" / "tmp")
@@ -66,6 +70,20 @@ def run_filter(program: bytes, *, architecture: int, number: int, family: int = 
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_webm_cues_check_reads_element_boundaries(self):
+        # Payload bytes that resemble Cues must not count as a Segment child.
+        cues, cluster = b"\x1c\x53\xbb\x6b", b"\x1f\x43\xb6\x75"
+        with tempfile.TemporaryDirectory(dir=ROOT / ".runtime/tmp") as directory:
+            path = Path(directory) / "sample.webm"
+            for size in (b"\xff", b"\x8b"):  # unknown and finite Segment sizes
+                path.write_bytes(b"\x18\x53\x80\x67" + size + cues + b"\x80" + cluster + b"\x81\x00")
+                self.assertEqual(sample.webm_elements(path), [0x1C53BB6B, 0x1F43B675])
+            path.write_bytes(b"\x18\x53\x80\x67\xff\xec\x84" + cues + cluster + b"\x80")
+            self.assertEqual(sample.webm_elements(path), [0xEC, 0x1F43B675])
+            path.write_bytes(b"\x18\x53\x80\x67\xff\x00")
+            with self.assertRaisesRegex(RuntimeError, "invalid WebM element header"):
+                sample.webm_elements(path)
+
     def test_unprovisioned_voice_fails_before_synthesis(self):
         with self.assertRaisesRegex(AssetError, "not provisioned"):
             local_selection(voice="af_missing")

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pgvideo.validate import validate_video
+from pgvideo.validate import _stream_end, validate_video
 from pgvideo.narration import _units
 from pgvideo.speech import Pronunciation
 
@@ -28,12 +28,12 @@ def delivery_fixture(run: Path, output: Path) -> None:
     (run / "render").mkdir(parents=True)
     (run / "narration").mkdir()
     ffmpeg = ROOT / ".runtime/bin/ffmpeg"
-    draft = run / "render/draft.mp4"
+    draft = run / "render/draft.webm"
     subprocess.run([str(ffmpeg), "-v", "error", "-y", "-f", "lavfi", "-i",
                     "color=c=blue:s=640x360:r=30:d=1", "-f", "lavfi", "-i",
-                    "sine=frequency=440:sample_rate=24000:duration=1", "-c:v", "libx264",
+                    "sine=frequency=440:sample_rate=24000:duration=1", "-c:v", "libsvtav1", "-preset", "10",
                     "-pix_fmt", "yuv420p", "-c:a", "libopus", "-b:a", "192k", "-ar", "48000",
-                    "-ac", "1", "-frames:v", "30", str(draft)], check=True)
+                    "-ac", "1", "-frames:v", "30", "-f", "webm", "-cues_to_front", "1", str(draft)], check=True)
     document = {"path": "wiki/v18/sample.md", "version": 18,
                 "url": "https://example.org/wiki/v18/sample.md"}
     script_hash = save(run / "storyboard.json", {"title": "Sample", "document": document,
@@ -63,6 +63,16 @@ def delivery_fixture(run: Path, output: Path) -> None:
 
 
 class ValidationTests(unittest.TestCase):
+    def test_track_end_times_use_each_webm_tag_without_adding_start_twice(self):
+        self.assertEqual(_stream_end({"start_time": "0.008", "tags": {"DURATION": "00:00:01.008000000"}}),
+                         1.008)
+        self.assertEqual(_stream_end({"tags": {"DURATION": "01:02:03.004000000"}}), 3723.004)
+        self.assertEqual(_stream_end({"start_time": "0.008", "duration": "1"}), 1.008)
+        for stream in ({}, {"tags": {"DURATION": "N/A"}}, {"tags": {"DURATION": "00:60:00"}},
+                       {"tags": {"DURATION": "00:00:60"}}, {"duration": "nan"}):
+            with self.subTest(stream=stream), self.assertRaises(ValueError):
+                _stream_end(stream)
+
     def test_audio_unit_split_keeps_punctuation_after_inline_code(self):
         text = ("When a backend initializes its status entry, it clears the activity string and "
                 "forces the last byte of the slot to `\\0`, "
@@ -84,14 +94,17 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual((reuse["registered"], reuse["reason"]), (False, "the narration, timing, and render "
                              "stages recorded no tools digest; repeat them to register the video"))
             delivery = output / run.name
-            self.assertTrue((delivery / "sample.mp4").is_file())
+            self.assertTrue((delivery / "sample.webm").is_file())
             self.assertEqual(json.loads((delivery / "manifest.json").read_text())["status"], "completed")
             quality = json.loads((delivery / "quality-report.json").read_text())
             self.assertEqual((quality["status"], quality["document"]["path"]),
                              ("completed", "wiki/v18/sample.md"))
+            media = quality["checks"]["media"]
+            self.assertEqual((media["container"], media["video_codec"], media["audio_codec"], media["fps"]),
+                             ("webm", "av1", "opus", 30))
             self.assertEqual(sorted(path.name for path in delivery.iterdir()),
                              ["captions.srt", "captions.vtt", "manifest.json", "quality-report.json", "references.md",
-                              "sample.mp4", "transcript.md"])
+                              "sample.webm", "transcript.md"])
 
     def test_every_stage_must_pass_before_validation(self):
         with tempfile.TemporaryDirectory(prefix="pgvideo-validate-", dir=ROOT / ".runtime/tmp") as temporary:

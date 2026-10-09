@@ -16,6 +16,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from playwright.sync_api import sync_playwright
+
 from pgvideo import cli, reuse
 from pgvideo import narration as narration_module
 from pgvideo import render as render_module
@@ -33,7 +35,7 @@ def components() -> dict:
         board,
         narration={"voice": "af_heart", "language": "a", "speed": 1.0, "loudness_lufs": -16.0,
                    "true_peak_dbtp": -1.5, "model": "6" * 64, "config": "7" * 64, "voice_asset": "8" * 64},
-        render={"width": 1920, "height": 1080, "fps": 30, "crf": 20, "audio_bitrate_kbps": 192},
+        render={"width": 1920, "height": 1080, "fps": 30, "crf": cli.CRF, "audio_bitrate_kbps": 192},
         tools=reuse.tools(PROJECT_ROOT))
 
 
@@ -148,7 +150,7 @@ class BuildTests(unittest.TestCase):
         return json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
 
     def delivered(self, run_dir, output="output"):
-        return (self.workspace / output / run_dir.name / "example.mp4").read_bytes()
+        return (self.workspace / output / run_dir.name / "example.webm").read_bytes()
 
     def runs(self):
         return sorted(path.name for path in (self.workspace / "runs").iterdir())
@@ -168,12 +170,12 @@ class BuildTests(unittest.TestCase):
                                        "duration_seconds"})
         delivery = self.workspace / "output" / "first"
         self.assertEqual((result["delivery"]["directory"], result["delivery"]["video"]),
-                         (str(delivery), str(delivery / "example.mp4")))
+                         (str(delivery), str(delivery / "example.webm")))
         self.assertEqual(sorted(path.name for path in delivery.iterdir()),
-                         ["captions.srt", "captions.vtt", "example.mp4", "manifest.json", "quality-report.json",
+                         ["captions.srt", "captions.vtt", "example.webm", "manifest.json", "quality-report.json",
                           "references.md", "transcript.md"])
         self.assertEqual(sorted(Path(file["path"]).name for file in result["delivery"]["files"]),
-                         ["captions.srt", "captions.vtt", "example.mp4", "references.md", "transcript.md"])
+                         ["captions.srt", "captions.vtt", "example.webm", "references.md", "transcript.md"])
         # Progress goes to standard error, so standard output is the result alone.
         self.assertIn("Narration master:", stderr)
         run_dir = self.workspace / "runs" / "first"
@@ -186,6 +188,36 @@ class BuildTests(unittest.TestCase):
                          list(STAGES))
         quality = json.loads((delivery / "quality-report.json").read_text(encoding="utf-8"))
         self.assertEqual(quality["status"], "completed")
+        # Play the delivered container in the bundled browser, including a seek
+        # to its end. A successful FFmpeg decode alone does not prove browser support.
+        with sync_playwright() as playwright:
+            with tempfile.TemporaryDirectory(dir=PROJECT_ROOT / ".runtime/tmp") as profile:
+                context = playwright.chromium.launch_persistent_context(
+                    profile, headless=True, accept_downloads=False,
+                    args=["--disable-background-networking", "--disable-component-update", "--no-first-run"])
+                try:
+                    page = context.new_page()
+                    page.route("http://**/*", lambda route: route.abort())
+                    page.route("https://**/*", lambda route: route.abort())
+                    page.goto((delivery / "example.webm").as_uri())
+                    playback = page.evaluate("""async () => {
+                      const video = document.querySelector('video');
+                      video.muted = true;
+                      return await new Promise((resolve, reject) => {
+                        const timer = setTimeout(() => reject(Error('WebM playback timed out')), 15000);
+                        video.onerror = () => { clearTimeout(timer); reject(Error('WebM playback failed')); };
+                        video.onended = () => { clearTimeout(timer); resolve({
+                          frames: video.getVideoPlaybackQuality().totalVideoFrames,
+                          duration: video.duration, end: video.currentTime}); };
+                        video.onplaying = () => { video.onplaying = null;
+                          video.currentTime = Math.max(0, video.duration - 0.25); };
+                        video.play().catch(reject);
+                      });
+                    }""")
+                    self.assertGreater(playback["frames"], 0)
+                    self.assertAlmostEqual(playback["duration"], playback["end"], delta=0.05)
+                finally:
+                    context.close()
         self.assertEqual(set(quality["checks"]), {"media", "complete_decode", "captions", "audio_units", "loudness"})
         self.assertEqual(quality["document"]["postgresql_version"], 18)
         # 192 kb/s leaves libopus the most headroom under validation's true-peak limit.
@@ -362,10 +394,10 @@ class BuildTests(unittest.TestCase):
     def test_changed_or_missing_files_are_not_reused(self):
         first, _output = self.build("first")
         key = self.manifest(first)["reuse"]["key"]
-        draft = first / "render/draft.mp4"
+        draft = first / "render/draft.webm"
         draft.write_bytes(draft.read_bytes() + b"\0")
         second, output = self.build("second")
-        self.assertIn("Reuse: skipped the video of request first: render/draft.mp4 in request first changed after "
+        self.assertIn("Reuse: skipped the video of request first: render/draft.webm in request first changed after "
                       "validation", output)
         self.assertIn("no validated video has the same inputs", output)
         self.assertNotIn("reused_from", self.manifest(second)["render"])

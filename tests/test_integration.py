@@ -1,10 +1,10 @@
-"""Integration check: real Kokoro audio, from its chunks to the delivered MP4.
+"""Integration check: real Kokoro audio, from its chunks to the delivered WebM.
 
 A three-scene storyboard is narrated with the local Kokoro model, timed, rendered,
 and validated. One hand-written unit is longer than Kokoro's 510-phoneme limit, so
 the model returns it in several chunks. The checks follow every sample: chunks to
 unit WAVs, units and pauses to the master, the master to caption cues and scene
-frames, and the master to the MP4's decoded audio and video, where dropped audio or
+frames, and the master to the WebM's decoded audio and video, where dropped audio or
 timing drift would show.
 """
 
@@ -125,7 +125,7 @@ class KokoroIntegrationTests(unittest.TestCase):
         save(self.run_dir / "manifest.json", {"script": {"status": "passed", "sha256": script}})
         (self.run_dir / "script.md").write_text("# Integration check\n")
 
-    def test_chunks_pauses_captions_and_the_last_scene_reach_the_mp4(self):
+    def test_chunks_pauses_captions_and_the_last_scene_reach_the_webm(self):
         create_narration(ROOT, self.run_dir)
         audio_map = json.loads((self.run_dir / "narration/audio-map.json").read_text())
         units = [unit for scene in audio_map["scenes"] for unit in scene["units"]]
@@ -189,8 +189,8 @@ class KokoroIntegrationTests(unittest.TestCase):
         self.assertLessEqual(quality["checks"]["media"]["end_difference_seconds"], 0.1)
         self.assertEqual(quality["checks"]["audio_units"]["last_unit"], "s03-credits.n1.u1")
 
-        # The MP4's decoded audio lines up with the master from the first unit to the last.
-        video = self.run_dir / "render/draft.mp4"
+        # The WebM's decoded audio lines up with the master from the first unit to the last.
+        video = self.run_dir / "render/draft.webm"
         decoded = np.frombuffer(subprocess.run(
             [str(FFMPEG), "-v", "error", "-nostdin", "-i", str(video), "-map", "0:a:0", "-f", "f32le",
              "-ac", "1", "-ar", str(RATE), "-"], capture_output=True, check=True).stdout, dtype="<f4")

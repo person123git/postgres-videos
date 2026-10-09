@@ -837,8 +837,8 @@ def doctor(lock: dict, *, sample: bool, announce: bool = True) -> None:
             record = lock["ffmpeg"][name]
             check_hash(record["executable"], record["binary_sha256"])
         result = run_local([str(local_path(".runtime/bin/ffmpeg")), "-hide_banner", "-encoders"], capture=True)
-        if "libx264" not in result.stdout or "libopus" not in result.stdout:
-            raise EnvironmentError("local FFmpeg lacks libx264 or libopus encoding")
+        if "libsvtav1" not in result.stdout or "libopus" not in result.stdout:
+            raise EnvironmentError("local FFmpeg lacks libsvtav1 or libopus encoding")
         result = run_local([str(local_path(".runtime/bin/ffmpeg")), "-hide_banner", "-filters"], capture=True)
         if "loudnorm" not in result.stdout or "aresample" not in result.stdout:
             raise EnvironmentError("local FFmpeg lacks required audio filters")
