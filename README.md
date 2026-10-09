@@ -548,3 +548,11 @@ directories used to simulate escaping paths.
 - **Integration** (`test_integration.py`) narrates a three-scene storyboard
   with the real Kokoro model and follows every sample from its chunks to the
   delivered MP4.
+
+## License
+
+This project is released under the [MIT License](LICENSE). The fonts in
+`assets/fonts/` keep their own license, the SIL Open Font License 1.1, whose
+text is beside them in `OFL-Inter.txt` and `OFL-NotoSansMono.txt`. The
+packages, models, and tools that `scripts/setup` downloads are not part of this
+repository and keep their own licenses.

@@ -106,6 +106,14 @@ own copy into its run directory when it starts, so a video is made from the wiki
 | `.runtime/` | The project-local Python runtime, tools, browsers, and `tmp/`. Not committed. |
 | `cache/` | Setup downloads, models, wheels, and reusable narration and videos. Not committed. |
 
+## License
+
+This project is licensed under the MIT License. [LICENSE](LICENSE) holds the license text and copyright notice;
+`pyproject.toml` (`license = "MIT"`) and the License section of [README.md](README.md#license) state the same
+license. Do not remove `LICENSE`, change its terms, or relicense the project unless the user asks, and keep the
+three in agreement. Third-party files keep their own licenses: the fonts in `assets/fonts/` are under the SIL
+Open Font License 1.1, whose text is beside them.
+
 ## Working files and resuming
 
 Choose `<id>`, a short name for the request: lowercase letters, digits, and hyphens. Use the same `<id>` for the
