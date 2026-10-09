@@ -262,3 +262,49 @@ the Opus encoder adds more to the narration master's true peak (about 0.1 dB at 
 
 Return the delivered paths: MP4, transcript, captions, references, and quality report. State the measured
 length, and any miss against the requested duration.
+
+## To do
+
+Planned repository work that is not done. It is not part of the video workflow: do an item only when the user asks
+for it, and delete it from this section when it is done.
+
+### Encode the video as AV1 in WebM
+
+Deliver AV1 video with Opus audio in WebM instead of H.264 with Opus in MP4, so that the video uses royalty-free
+codecs in an open container. The audio does not change: libopus at 192 kb/s, and [Audio encoding](#audio-encoding)
+still applies. The pinned FFmpeg 9.0.2 already has the `libsvtav1` encoder and the WebM muxer with its
+`cues_to_front` option; no dependency changes.
+
+**Blocked:** the work needs a provisioned environment to measure and test it, and `scripts/setup` failed with
+`CERTIFICATE_VERIFY_FAILED`. A Zscaler TLS-inspecting proxy re-signed `github.com`, `raw.githubusercontent.com`,
+`download.pytorch.org`, and `ffmpeg.martin-riedl.de`, and setup trusts only the pinned certifi bundle. Do not weaken
+that trust to get past it: provision on a network without the inspection, or ask the user.
+
+1. Measure before you choose the defaults. Encode the slides and narration of a real build with SVT-AV1 at a few
+   presets and CRF values, and compare each with the current encode (x264 `-preset veryfast -crf 20`): text
+   sharpness (the pinned FFmpeg has `libvmaf`), file size, and encode time.
+2. `src/pgvideo/render.py`: encode `render/draft.webm` with `-c:v libsvtav1 -preset <preset> -crf <crf>
+   -pix_fmt yuv420p` and `-f webm -cues_to_front 1`, in place of `libx264 -preset veryfast` and
+   `-movflags +faststart`, and expect the codec `av1` after encoding. libsvtav1's CRF range is 0–63, not x264's
+   0–51.
+3. `src/pgvideo/cli.py`: the measured `CRF` default, which `create_render`'s default must equal
+   (`tests/test_build.py` checks it), and the `--crf` help text. Here and in the other modules, update the messages
+   and docstrings that say MP4.
+4. `src/pgvideo/validate.py`: the container `webm` (ffprobe names the format `matroska,webm`), the codec `av1`, the
+   report's media fields, and the delivered `<slug>.webm`. Check on a real draft what ffprobe reports for its
+   streams. Matroska has no track duration field, so the stream `duration` that the end-time checks read may be
+   absent (look for a `DURATION` tag). WebM timestamps are in milliseconds, and the exact `30/1` frame-rate checks
+   must still hold.
+5. `src/pgvideo/reuse.py`: `render/draft.mp4` in `MEDIA_FILE` and `REQUIRED_FILES`. Cached H.264 videos are not
+   reused after the change, because the key covers `render.py` and `validate.py`.
+6. `scripts/environment.py`: doctor's encoder check requires `libsvtav1` and `libopus` instead of `libx264`.
+   `scripts/sample_environment.py`: encode a WebM sample, and replace the MP4 check that `moov` comes before `mdat`
+   with a check that the WebM's Cues come before its first Cluster.
+7. Tests: the x264 fixture and `sample.mp4` in `tests/test_validate.py`, `example.mp4` in `tests/test_build.py`, and
+   `render/draft.mp4` in `tests/test_integration.py`.
+8. Documents: the MP4, H.264, and `+faststart` mentions and the delivered file names in README.md and in this file.
+   Replace the README's note on Opus in MP4 with the browsers that play AV1 and Opus in WebM. Check current support
+   rather than assume it; Safari, for one, decodes AV1 only on devices with a hardware decoder.
+
+Done when `scripts/pgvideo test` and `scripts/pgvideo doctor --sample` pass and a delivered video plays in the
+bundled headless Chromium.
