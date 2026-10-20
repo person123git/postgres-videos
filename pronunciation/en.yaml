@@ -129,6 +129,10 @@ terms:
   indisready: ind is ready
   indislive: ind is live
   indimmediate: ind immediate
+  relispartition: rel is partition
+  limitXmin: limit x min
+  "17.11": 17 point 11
+  userid: user I D
   reindex-conc-index-built: reindex concurrent index built
   PROC_IN_SAFE_IC: proc in safe I C
   # A two-letter capital word inside a code span is spelled; these keep `IS NULL`, a `DO` block, `NOT IN`,
