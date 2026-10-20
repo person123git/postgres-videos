@@ -1,0 +1,31 @@
+{
+  "$schema": "https://pi.dev/schemas/settings.schema.json",
+  "defaultProvider": "llamacpp",
+  "defaultModel": "Qwen3.8-27B",
+  "enabledModels": [
+  "llamacpp/Qwen3.8"
+  ],
+  "modelThinkingLevels": {
+    "llamacpp/Qwen3.8": "xhigh"
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 20000,
+    "keepRecentTokens": 15000
+  },
+  "httpIdleTimeoutMs": 90000000,
+  "retry": {
+    "provider": {
+      "timeoutMs": 90000000
+    }
+  },
+  "defaultTools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ]
+}

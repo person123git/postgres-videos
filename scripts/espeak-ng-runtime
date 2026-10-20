@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+case $0 in
+    */*) script_dir=${0%/*} ;;
+    *) script_dir=. ;;
+esac
+script_dir=$(CDPATH= cd -- "$script_dir" && pwd -P)
+project_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
+exec "$project_root/.venv/bin/python" -I "$project_root/scripts/espeak_cli.py" "$@"
