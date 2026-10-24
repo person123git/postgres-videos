@@ -67,6 +67,12 @@ taught clearly, without padding. When a video would run over 30 minutes, propose
     at 1 in teaching order. Build each part with `--part <number>` so its delivered video filename includes
     the part number: `<page>-part-01.webm`, `<page>-part-02.webm`, and so on. A numbered request directory
     alone is not enough. Keep the same part number on revisions and rebuilds.
+11. **Name PostgreSQL sparingly.** The whole video is about PostgreSQL, so the viewer does not need to hear it
+    again and again. In narration and on slides, say "PostgreSQL" or "Postgres" once, where the video
+    introduces its subject, and again only when a sentence needs it to be clear or correct: a version scope
+    ("in PostgreSQL 17"), a contrast with something that is not PostgreSQL, or a proper name such as a source
+    file or setting. Elsewhere, leave it out or use the specific component, such as "the planner" or
+    "the server". Do not drop it where removing it would change a claim's meaning or version scope (rule 2).
 
 ## The wiki: downloaded into `runs/<id>/wiki_content/`
 
