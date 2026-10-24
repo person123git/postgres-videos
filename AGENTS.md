@@ -259,12 +259,11 @@ part's title, sections, and estimated length. Do not drop or compress content to
 Read [prompts/draft.md](prompts/draft.md), [schemas/storyboard.schema.json](schemas/storyboard.schema.json), the
 plan, and the document.
 
-- Lead with the answer. Use short sentences and introduce terms when needed. Use only the page's examples.
+- Use short sentences and introduce terms when needed. Use only the page's examples.
 - Give every sentence that states a fact its `sources`: the document's section headings or line ranges, or
   explicitly named `glossary.md` entries or line ranges, where the fact is stated.
 - Mark a sentence `framing` only when it contains no technical claim.
-- A diagram edge goes from the node that acts to the node it acts on, as a narrated sentence states it.
-- Follow the draft prompt's layout limits. Copy code, table rows, and glossary definitions exactly.
+- Copy code, table rows, and glossary definitions exactly.
 - Keep all required qualifications. Give each claim the narration it needs to be clear, without padding.
 
 Save the storyboard as `runs/<id>/scratch/storyboard.json`.
@@ -285,8 +284,8 @@ Build narrates, times, renders, checks the media, and delivers the files. Read t
 | Result | Meaning |
 | --- | --- |
 | `completed` (exit 0) | The video is delivered. `delivery` lists the files; `duration_seconds` is the measured length. |
-| `needs_review` (exit 3) | Narration or rendering cannot handle something; `stage` says where. At `storyboard`, a blocking entry in `issues` names it: text Kokoro cannot say, a diagram edge without its node, or a slide image that is missing. At `validation`, a media measurement is outside its limits: `message` names it, and `runs/<id>/quality-report.json` has the values. A warning in `issues` never stops a build. |
-| `failed` (exit 1) | An error. Read the message: a malformed storyboard names the schema rule it breaks; a slide that overflows names its scene. |
+| `needs_review` (exit 3) | Narration or rendering cannot handle something; `stage` says where. At `storyboard`, a blocking entry in `issues` names it: text Kokoro cannot say, or a slide image that is missing. At `validation`, a media measurement is outside its limits: `message` names it, and `runs/<id>/quality-report.json` has the values. A warning in `issues` never stops a build. |
+| `failed` (exit 1) | An error. Read the message: a malformed storyboard names the schema rule it breaks. A slide whose content does not fit is recorded under `overflow` in `runs/<id>/render.json` and does not stop the build. |
 
 After you change the storyboard, run the same command again. Sentences that did not change reuse their audio.
 After you change `pronunciation/en.yaml` (rule 9), the same command synthesizes every sentence again.
@@ -310,32 +309,6 @@ Return the delivered paths: WebM, transcript, captions, references, and quality 
 length, and give the path of the request's record, `runs/<id>/scratch/prompt-log.md`.
 
 # Agent Instructions
-
-## Visual explanations
-
-- Make visual explanations the default throughout the video. Use diagrams, SQL snippets, tables, query
-  results, and data displays wherever the source supports them and they help explain the selected content.
-  Prefer these to prose-only or bullet-only slides when they make the explanation clearer.
-- During planning, identify visual opportunities for each selected concept: diagrams for relationships and
-  processes, SQL for operations, and tables or data displays for examples and comparisons. Keep any visual
-  planning notes in `runs/<id>/scratch/`; follow the existing plan and storyboard schemas.
-- Diagrams may translate relationships or steps described in the source into a visual explanation. Every
-  node, label, arrow, and sequence must preserve the source's meaning and qualifications.
-- Use SQL, data, and query results from the document; copy code and table rows exactly. Never invent queries,
-  sample rows, outputs, measurements, or relationships to make a slide more visual. If the source does not
-  support a useful visual, use a concise text explanation.
-- Maximize useful visual coverage while preserving readability, layout limits, the requested scope, and the
-  rule to explain each fact once. Keep each visual focused; use successive scenes or supported reveals and
-  highlights to walk through complex material in narration order.
-- Before finalizing the storyboard, review prose-only slides for opportunities to explain their content
-  visually. Check every visual against its source and the narration alignment requirements below.
-
-## Mandatory narration and slide alignment
-
-- Narration MUST cover every content item shown on each slide, including titles, text, bullets, labels, diagrams, code, and data.
-- Narration MUST stay synchronized with the visible slide text and preserve its meaning. Discuss each item while it is visible and coordinate the narration with any reveals or highlights.
-- Narration MUST follow the order a viewer expects from the slide's layout and visual cues: normally top to bottom and left to right, unless numbering, arrows, grouping, or staged reveals establish a different sequence.
-- Before finalizing, review each slide alongside its narration to verify complete coverage, matching order, and synchronized timing. Resolve any omissions or mismatches, and finish discussing all slide content before advancing.
 
 ## Mandatory prompt and adjustment record
 

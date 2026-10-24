@@ -31,9 +31,7 @@
       "required": ["id", "part", "title", "screen", "narration"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "part": {"enum": ["opening", "question", "terminology", "answer", "mechanism", "example", "caveat",
-                          "supporting", "open_questions", "recap", "credits"],
-                 "description": "Which step of the explanation the scene serves; shown above the heading"},
+        "part": {"type": "string", "minLength": 1, "description": "A name you choose for the step of the video the scene serves; shown above the heading"},
         "title": {"type": "string", "minLength": 1, "maxLength": 120},
         "screen": {"$ref": "#/$defs/screen"},
         "visual": {"type": "string", "maxLength": 400, "description": "What the screen teaches, in one or two sentences; for the transcript"},
@@ -63,8 +61,8 @@
       "required": ["layout"],
       "properties": {
         "layout": {"enum": ["title", "question", "bullets", "steps", "code", "table", "diagram", "terms", "image", "credits"]},
-        "heading": {"type": "string", "maxLength": 200},
-        "lines": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 300}},
+        "heading": {"type": "string"},
+        "lines": {"type": "array", "items": {"type": "string"}},
         "code": {
           "type": "object",
           "additionalProperties": false,
@@ -83,17 +81,24 @@
         "diagram": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["nodes", "edges"],
+          "description": "Drawn as boxes and arrows in layers along direction, each edge label on its arrow",
           "properties": {
-            "nodes": {"type": "array", "minItems": 2, "items": {
+            "direction": {"enum": ["right", "down"], "description": "Which way the arrows flow: right (the default) or down"},
+            "focus": {"type": "array", "items": {"type": "string", "minLength": 1},
+                      "description": "IDs of the nodes the narration is about; they and the edges between them are highlighted and the rest dimmed"},
+            "nodes": {"type": "array", "items": {
               "type": "object", "additionalProperties": false, "required": ["id", "label"],
-              "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}}}},
-            "edges": {"type": "array", "minItems": 1, "items": {
-              "type": "object", "additionalProperties": false, "required": ["from", "to", "label"],
+              "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1},
+                             "detail": {"type": "string", "minLength": 1, "maxLength": 120, "description": "A smaller second line under the label"},
+                             "kind": {"enum": ["component", "data", "state", "external"],
+                                      "description": "The node's shape: component (the default) for a process, function, or module; data for stored data such as a table, file, or memory area; state for a state or phase; external for something outside the subject"}}}},
+            "edges": {"type": "array", "items": {
+              "type": "object", "additionalProperties": false, "required": ["from", "to"],
               "properties": {
                 "from": {"type": "string", "description": "The ID of the node that acts"},
                 "to": {"type": "string", "description": "The ID of the node it acts on"},
-                "label": {"type": "string", "minLength": 1}}}}
+                "label": {"type": "string"},
+                "style": {"enum": ["solid", "dashed"], "description": "dashed for a path the document makes conditional or optional"}}}}
           }
         },
         "terms": {"type": "array", "minItems": 1, "items": {
@@ -102,7 +107,7 @@
         "image": {"type": "object", "additionalProperties": false, "required": ["path"],
                   "properties": {"path": {"type": "string", "minLength": 1, "description": "An image file inside the project, from the project root, such as runs/<id>/wiki_content/v18/images/figure.png"},
                                  "alt": {"type": "string"}}},
-        "footer": {"type": "string", "maxLength": 200, "description": "Replaces the document path at the bottom of the slide"}
+        "footer": {"type": "string", "description": "Replaces the document path at the bottom of the slide"}
       }
     }
   }

@@ -102,6 +102,11 @@ class StoryboardTests(unittest.TestCase):
             "no sources or origin": lambda b: self.scene(b, "answer").update(
                 narration=[{"text": "Slots are sized at startup."}], sources=[]),
             "a reversed edge": reverse,
+            "an edge to an unknown node": lambda b: self.scene(b, "read-path")["screen"]["diagram"]["edges"][0].update(
+                to="absent"),
+            "a focus on an unknown node": lambda b: self.scene(b, "read-path")["screen"]["diagram"].update(
+                focus=["absent"]),
+            "a diagram layout without a diagram": lambda b: self.scene(b, "read-path")["screen"].pop("diagram"),
             "a technical framing sentence": lambda b: b["scenes"][0]["narration"].append(
                 {"text": "It reserves 64 megabytes in PostgreSQL 17.", "origin": "framing"}),
             "no opening or credits": lambda b: b.update(scenes=b["scenes"][2:4]),
@@ -119,7 +124,6 @@ class StoryboardTests(unittest.TestCase):
         cases = {
             "unspeakable_tts": lambda b: self.scene(b, "answer")["narration"][0].update(
                 tts="example_size sets the size.", tts_source="manual"),
-            "diagram_edge": lambda b: self.scene(b, "read-path")["screen"]["diagram"]["edges"][0].update(to="absent"),
             "missing_image": lambda b: self.scene(b, "figure")["screen"]["image"].update(
                 path="runs/sample/wiki_content/no.png"),
         }
@@ -141,21 +145,21 @@ class StoryboardTests(unittest.TestCase):
         self.assertEqual(self.scene(record, "answer")["narration"][0]["tts"],
                          "example size sets the size of each slot.")
 
-        # Screens that are hard to read are warnings; the storyboard still passes.
-        warnings = {
+        # No screen size or layout content is checked: each of these imports without an issue.
+        screens = {
             "dense_screen": lambda b: self.scene(b, "answer")["screen"].update(lines=[f"Line {n}" for n in range(7)]),
             "long_line": lambda b: self.scene(b, "answer")["screen"].update(lines=["word " * 50]),
             "long_heading": lambda b: self.scene(b, "answer")["screen"].update(heading="heading " * 15),
             "long_code": lambda b: self.scene(b, "query")["screen"]["code"].update(content="SELECT 1;\n" * 20),
             "wide_code": lambda b: self.scene(b, "query")["screen"]["code"].update(content="SELECT " + "x, " * 40),
             "dense_table": lambda b: self.scene(b, "defaults")["screen"]["table"].update(rows=[["a", "b"]] * 8),
+            "no lines": lambda b: self.scene(b, "answer")["screen"].pop("lines"),
+            "a code layout without code": lambda b: self.scene(b, "answer")["screen"].update(layout="code"),
         }
-        for code, change in warnings.items():
-            with self.subTest(warning=code):
+        for name, change in screens.items():
+            with self.subTest(screen=name):
                 entry, record = self.changed(change)
-                self.assertEqual((entry["status"], self.codes(record, "warning")), ("passed", {code}))
-        _entry, record = self.changed(lambda b: self.scene(b, "answer")["screen"].pop("lines"))
-        self.assertEqual(self.codes(record, "note"), {"empty_screen"})
+                self.assertEqual((entry["status"], record["issues"]), ("passed", []))
 
     def test_the_schema_is_the_storyboard_format(self):
         cases = {
@@ -175,7 +179,6 @@ class StoryboardTests(unittest.TestCase):
             "is not one of": lambda b: b["scenes"][2]["screen"].update(layout="slideshow"),
             "should be non-empty": lambda b: b["scenes"][2].update(narration=[]),
             "'title' is a required property (scene)": lambda b: b["scenes"][2].pop("title"),
-            "a code layout needs screen.code": lambda b: b["scenes"][2]["screen"].update(layout="code"),
             "the id answer is used twice": lambda b: b["scenes"][3].update(id="answer"),
             "tts_source manual needs nonempty tts text": lambda b: b["scenes"][2]["narration"][0].update(
                 tts_source="manual"),

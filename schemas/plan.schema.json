@@ -105,8 +105,7 @@
       "required": ["id", "part", "title", "purpose", "claims", "estimated_seconds"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "part": {"enum": ["opening", "question", "terminology", "answer", "mechanism", "example", "caveat",
-                          "supporting", "open_questions", "recap", "credits"]},
+        "part": {"type": "string", "minLength": 1},
         "title": {"type": "string", "minLength": 1, "maxLength": 120},
         "purpose": {"type": "string", "minLength": 1, "maxLength": 400},
         "claims": {"type": "array", "items": {"$ref": "#/$defs/id"}},

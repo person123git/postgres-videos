@@ -128,7 +128,7 @@ With `--json`, `build` prints:
 | --- | --- | --- |
 | `completed` | 0 | The video and its files are delivered. |
 | `needs_review` | 3 | Narration or rendering cannot handle something in the storyboard (`stage` is `storyboard`, with `issues`), or a media measurement is outside its limits (`stage` is `validation`; see `runs/<id>/quality-report.json`). |
-| `failed` | 1 | An error, such as a storyboard that does not match its schema, a slide whose content overflows, or a missing local tool. `stage` names where it stopped. |
+| `failed` | 1 | An error, such as a storyboard that does not match its schema or a missing local tool. `stage` names where it stopped. |
 
 A result folds more than three issues of one code into one issue with a `count`,
 the first messages as `examples`, and the scenes it names;
@@ -161,7 +161,12 @@ and [prompts/draft.md](prompts/draft.md) says how to write one.
   `layout` (`title`, `question`, `bullets`, `steps`, `code`, `table`,
   `diagram`, `terms`, `image`, or `credits`) and that layout's content. An
   `image` names a file inside the project by its path from the project root,
-  such as a figure under `runs/<id>/wiki_content/`.
+  such as a figure under `runs/<id>/wiki_content/`. A `diagram` is drawn as
+  boxes and arrows laid out in layers (`direction` `right` or `down`); nodes
+  may have a `kind` (shape) and a `detail` line, edges may be `dashed`, and
+  `focus` highlights some nodes and dims the rest. Nothing about a diagram
+  stops a build: it is scaled to fit, and an edge to a node it does not have is
+  left out.
 - A narration item's `text` is what the captions show, with code in backticks.
   pgvideo derives the spoken text from `pronunciation/en.yaml`; an item may
   carry its own with `tts` and `tts_source: "manual"`.
@@ -173,10 +178,7 @@ Importing a storyboard checks only what narration and rendering depend on:
 | Issue | Severity | Meaning |
 | --- | --- | --- |
 | `unspeakable_tts` | blocking | The spoken text has a symbol Kokoro would read aloud or drop. Add a pronunciation or write the item's `tts`. |
-| `diagram_edge` | blocking | An edge names a node the diagram does not have. |
 | `missing_image` | blocking | A slide image is not an image file inside the project. |
-| `dense_screen`, `long_line`, `long_heading`, `long_code`, `wide_code`, `dense_table` | warning | A screen may be hard to read. The renderer stops only when content does not fit the slide. |
-| `empty_screen` | note | A bullets, steps, or question screen has no lines. |
 
 ## The plan
 
@@ -257,7 +259,7 @@ wiki itself, with `curl`, before it writes anything. See
 | The harness does not follow the workflow | Tell it to read `AGENTS.md`; not every harness loads it automatically. |
 | "does not match schemas/storyboard.schema.json" | The storyboard is malformed or includes fields pgvideo computes, such as statuses or sentence IDs. One rule broken in many scenes is reported as one line. |
 | `unspeakable_tts` | Add the term to `pronunciation/en.yaml`, or give the sentence its own `tts` with `tts_source: manual`. |
-| "Slide … has overflow, cropped content, or a missing image" | The scene's content does not fit one slide. Split the scene or shorten its lines, code, or table. |
+| "Slide … has a missing image" | The image file could not be loaded. |
 | "Encoded audio loudness is outside delivery limits" | See `runs/<id>/quality-report.json`. Do not lower the audio bitrate: below 192 kb/s the encoder adds more to the true peak. |
 | Command fails before starting | `scripts/pgvideo doctor` names the missing or changed local dependency; `scripts/setup --offline` restores it. |
 | "Chromium startup is blocked" or Chromium reports `shutdown: Operation not permitted` | The host sandbox denies local Unix socket IPC. Use the host runner's approval mechanism to run `scripts/pgvideo` with permission for these operations, keeping pgvideo's own offline sandbox enabled. `doctor` checks this before Chromium starts. Reinstalling dependencies does not fix a host permission denial. |
@@ -466,8 +468,9 @@ without resynthesizing audio:
 ### Rendering, checks, and delivery
 
 After timing, Playwright renders each storyboard scene to a PNG using the
-bundled fonts and a reusable slide template. It rejects overflow, missing
-images, and fonts outside the bundle. The renderer holds each PNG for the
+bundled fonts and a reusable slide template. It rejects missing images and
+fonts outside the bundle; content that does not fit a slide is recorded under
+`overflow` in `render.json` and does not stop the build. The renderer holds each PNG for the
 scene's measured frame count, then encodes `render/draft.webm` with AV1 video
 at 30 fps and Opus mono audio at 48 kHz. `render.json` records the input and
 artifact hashes, and `references.md` lists the page and each scene's citations.

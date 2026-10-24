@@ -121,36 +121,43 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
                     screen = scene["screen"]
                     image_url = _image(root, screen)
                     note = storyboard["document"]["path"]
-                    # An edge names its nodes by ID; the slide shows their labels.
-                    node_labels = {node["id"]: node["label"]
-                                   for node in (screen.get("diagram") or {}).get("nodes", [])}
                     html = template.render(font_url=font_url, mono_url=mono_url, layout=screen["layout"],
                                            screen=screen, title=scene["title"], part=scene["part"],
                                            version=storyboard["document"]["version"], source_note=note,
-                                           image_url=image_url, node_labels=node_labels)
+                                           image_url=image_url)
                     html_path = slides_dir / f"{index:03d}.html"
                     html_path.write_text(html, encoding="utf-8")
                     page.goto(html_path.as_uri(), wait_until="load")
                     page.evaluate("Promise.all([document.fonts.load('600 32px Inter'), document.fonts.load('400 20px NotoMono')])")
                     if not page.evaluate("document.fonts.check('600 32px Inter') && document.fonts.check('400 20px NotoMono')"):
                         raise ValueError(f"Bundled fonts failed to load in scene {scene['id']}")
+                    page.evaluate("window.pgvideoLayout && window.pgvideoLayout()")
                     state = page.evaluate("""() => {
                       const all = [...document.querySelectorAll('main, h1, .content, .line, pre, table, .term, footer')];
                       const overflow = all.filter(el => el.scrollWidth > el.clientWidth + 2 ||
                         el.scrollHeight > el.clientHeight + 2).map(el => el.tagName.toLowerCase());
+                      // Content that runs past the content box is clipped without scrolling.
+                      const box = document.querySelector('.content').getBoundingClientRect();
+                      for (const el of document.querySelectorAll('.content > *, .line, tr, .term')) {
+                        const rect = el.getBoundingClientRect();
+                        if (rect.bottom > box.bottom + 2 || rect.right > box.right + 2)
+                          overflow.push('clipped ' + el.tagName.toLowerCase());
+                      }
                       const image = document.querySelector('img');
                       return {overflow, imageLoaded: !image || (image.complete && image.naturalWidth > 0)};
                     }""")
-                    if state["overflow"] or not state["imageLoaded"]:
-                        raise ValueError(f"Slide {scene['id']} has overflow, cropped content, or a missing image: {state}")
+                    if not state["imageLoaded"]:
+                        raise ValueError(f"Slide {scene['id']} has a missing image")
                     _check_rendered_fonts(page, scene["id"])
                     png = slides_dir / f"{index:03d}.png"
                     page.screenshot(path=str(png))
                     header = png.read_bytes()[:24]
                     if header[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", header[16:24]) != (width, height):
                         raise ValueError(f"Slide {scene['id']} has incorrect PNG dimensions")
+                    # Content that does not fit is recorded, not refused.
                     results.append({"id": scene["id"], "file": str(png.relative_to(run_dir)),
-                                    "sha256": _sha(png), "frames": timing["frames"]})
+                                    "sha256": _sha(png), "frames": timing["frames"],
+                                    **({"overflow": state["overflow"]} if state["overflow"] else {})})
             finally:
                 context.close()
     return results

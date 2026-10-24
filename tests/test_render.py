@@ -69,23 +69,43 @@ class RenderTests(unittest.TestCase):
             self.assertLess(max(changes[0], changes[1], changes[3], changes[4]), 1, changes)
             self.assertGreater(changes[2], 1, changes)
 
-    def test_a_diagram_slide_names_edge_ends_by_their_labels(self):
+    def render_diagram(self, diagram):
         from pgvideo.render import _render_slides
 
-        with tempfile.TemporaryDirectory(prefix="pgvideo-render-test-", dir=ROOT / ".runtime/tmp") as temporary:
-            run = Path(temporary)
-            document = {"path": "wiki/v18/sample.md", "version": 18}
-            screen = {"layout": "diagram", "heading": "Who calls whom", "lines": [], "diagram": {
-                "nodes": [{"id": "n1", "label": "`pg_stat_get_activity()`"}, {"id": "n2", "label": "Shared memory"}],
-                "edges": [{"from": "n1", "to": "n2", "label": "reads"}]}}
-            storyboard = {"title": "Sample", "document": document, "scenes": [
-                {"id": "flow", "part": "mechanism", "title": "Flow", "screen": screen, "narration": []}]}
-            _render_slides(ROOT, run, storyboard, {"scenes": [{"frames": 1}]}, run / "render", 640, 360)
-            page = (run / "render/slides/001.html").read_text(encoding="utf-8")
-            # An edge reads as label, verb, label; the slide shows the labels, not node IDs.
-            self.assertIn("<code>pg_stat_get_activity()</code> → Shared memory: reads", page)
-            self.assertNotIn("n1 → n2", page)
-            self.assertIn('<span class="node"><code>pg_stat_get_activity()</code></span>', page)
+        temporary = tempfile.TemporaryDirectory(prefix="pgvideo-render-test-", dir=ROOT / ".runtime/tmp")
+        self.addCleanup(temporary.cleanup)
+        run = Path(temporary.name)
+        screen = {"layout": "diagram", "heading": "Who calls whom", "lines": [], "diagram": diagram}
+        storyboard = {"title": "Sample", "document": {"path": "wiki/v18/sample.md", "version": 18}, "scenes": [
+            {"id": "flow", "part": "mechanism", "title": "Flow", "screen": screen, "narration": []}]}
+        _render_slides(ROOT, run, storyboard, {"scenes": [{"frames": 1}]}, run / "render", 640, 360)
+        return (run / "render/slides/001.html").read_text(encoding="utf-8")
+
+    def test_a_diagram_slide_draws_labelled_nodes_and_edges(self):
+        page = self.render_diagram({"direction": "down", "focus": ["n1", "n2"], "nodes": [
+            {"id": "n1", "label": "`pg_stat_get_activity()`", "detail": "a function"},
+            {"id": "n2", "label": "Shared memory", "kind": "data"}, {"id": "n3", "label": "Other"}],
+            "edges": [{"from": "n1", "to": "n2", "label": "reads"},
+                      {"from": "n2", "to": "n1", "label": "`answers`", "style": "dashed"},
+                      {"from": "n3", "to": "n3", "label": "loops"}]})
+        # The slide shows labels, not node IDs; focused nodes and the edges between them are highlighted.
+        self.assertIn('<div class="node kind-component hot" data-id="n1"><div class="label">'
+                      '<code>pg_stat_get_activity()</code></div><div class="detail">a function</div></div>', page)
+        self.assertIn('<div class="node kind-data hot" data-id="n2">', page)
+        self.assertIn('<div class="node kind-component dim" data-id="n3">', page)
+        self.assertIn('<div class="edge-label hot" data-edge="1"><code>answers</code></div>', page)
+        self.assertIn('<div class="edge-label dim" data-edge="2">loops</div>', page)
+
+    def test_any_diagram_renders(self):
+        # Nothing about a diagram stops the render: its size, repeated IDs, unknown nodes, or no content.
+        nodes = [{"id": f"n{i}", "label": f"A long node label number {i}"} for i in range(9)]
+        edges = [{"from": f"n{i}", "to": f"n{i + 1}", "label": "then calls the next one"} for i in range(8)]
+        for diagram in ({"nodes": nodes, "edges": edges},
+                        {"nodes": nodes[:2] + [{"id": "n0", "label": "Again"}],
+                         "edges": [{"from": "n0", "to": "absent"}, {"from": "n0", "to": "n1"}], "focus": ["absent"]},
+                        {"nodes": [], "edges": []}, {}):
+            with self.subTest(diagram=diagram):
+                self.render_diagram(diagram)
 
 
 if __name__ == "__main__":

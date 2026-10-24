@@ -20,11 +20,27 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #192e42; borde
 table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 1.4vw; line-height: 1.25; }
 th, td { border: 1px solid #4e6a80; padding: .55em; vertical-align: top; overflow-wrap: anywhere; }
 th { color: #9de5f8; background: #233e52; text-align: left; }
-.diagram { display: flex; flex-wrap: wrap; align-items: center; gap: 1.4vw; }
-.node { padding: 1vw 1.4vw; border: 2px solid #76cbe9; border-radius: .6vw; background: #19354a; font-size: 1.6vw; }
-.edge { color: #a9c4d5; font-size: 1.3vw; }
-.edge-list { display: flex; flex-wrap: wrap; gap: .8vw; }
-.edge-list span { color: #d3e5ed; font-size: 1.25vw; background: #19354a; padding: .35vw .65vw; border-radius: .25vw; }
+.diagram { position: relative; flex: 1; min-height: 0; width: 100%; overflow: hidden; }
+.diagram .stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.diagram svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.diagram path { fill: none; stroke: #a9c4d5; stroke-width: 2.5; }
+.diagram path.dashed { stroke-dasharray: 10 8; }
+.diagram path.hot { stroke: #ffd27a; stroke-width: 3.5; }
+.diagram marker path { fill: #a9c4d5; stroke: none; }
+.diagram marker#arrow-hot path { fill: #ffd27a; }
+.node { position: absolute; max-width: 26vw; padding: .9vw 1.3vw; border: 2px solid #76cbe9; border-radius: .6vw;
+        background: #19354a; font-size: 1.6vw; line-height: 1.25; text-align: center; overflow-wrap: break-word; }
+.node .detail { color: #a9c4d5; font-size: 1.15vw; margin-top: .35vw; }
+.node.kind-data { border-color: #8fd6a8; border-width: .45vw 2px; border-radius: 1.2vw / .7vw; background: #173a30; }
+.node.kind-state { border-color: #c9a6ff; border-radius: 99vw; background: #2a2647; padding: .9vw 1.8vw; }
+.node.kind-external { border-style: dashed; border-color: #a9bdca; background: transparent; }
+.node.hot { border-color: #ffd27a; box-shadow: 0 0 0 .35vw rgba(255, 210, 122, .25); }
+.edge-label { position: absolute; max-width: 15vw; padding: .2vw .55vw; border-radius: .3vw; background: #101e2d;
+              color: #d3e5ed; font-size: 1.2vw; line-height: 1.25; text-align: center; overflow-wrap: break-word; }
+.edge-label:empty { display: none; }
+.edge-label.hot { color: #ffe3a8; }
+.diagram .node.dim, .diagram path.dim { opacity: .3; }
+.edge-label.dim, .edge-label.dim code { color: #4f6577; }
 .term { font-size: 1.6vw; line-height: 1.28; padding: .55em; background: #19354a; border-radius: .4vw; }
 .term strong { color: #9de5f8; }
 .illustration { max-width: 100%; max-height: 100%; object-fit: contain; align-self: center; }
@@ -32,14 +48,202 @@ footer { border-top: 1px solid #496176; padding-top: 1%; color: #a9bdca; font-si
 </style></head><body>
 <main class="slide layout-{{ layout }}">
 <div class="kicker">PostgreSQL {{ version }} · {{ part|replace('_', ' ') }}</div>
-<h1>{{ screen.heading or title }}</h1>
+<h1>{{ (screen.heading or title)|inline_code }}</h1>
 <section class="content">
 {% if screen.lines %}{% for line in screen.lines %}<div class="line">{{ line|inline_code }}</div>{% endfor %}{% endif %}
 {% if screen.code %}<pre><code>{{ screen.code.content }}</code></pre>{% endif %}
 {% if screen.table %}<div class="table-wrap"><table><thead><tr>{% for cell in screen.table.header %}<th>{{ cell|inline_code }}</th>{% endfor %}</tr></thead><tbody>{% for row in screen.table.rows %}<tr>{% for cell in row %}<td>{{ cell|inline_code }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% endif %}
-{% if screen.diagram %}<div class="diagram">{% for node in screen.diagram.nodes %}<span class="node">{{ node.label|inline_code }}</span>{% endfor %}</div><div class="edge-list">{% for edge in screen.diagram.edges %}<span>{{ node_labels.get(edge.from, edge.from)|inline_code }} → {{ node_labels.get(edge.to, edge.to)|inline_code }}{% if edge.label %}: {{ edge.label }}{% endif %}</span>{% endfor %}</div>{% endif %}
+{% if screen.diagram %}{% set diagram = screen.diagram %}{% set focus = diagram.focus or [] %}<div class="diagram"><div class="stage">
+<svg class="edges"><defs>{% for name in ('arrow', 'arrow-hot') %}<marker id="{{ name }}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>{% endfor %}</defs></svg>
+{% for node in diagram.nodes or [] %}<div class="node kind-{{ node.kind or 'component' }}{% if focus %}{% if node.id in focus %} hot{% else %} dim{% endif %}{% endif %}" data-id="{{ node.id }}"><div class="label">{{ node.label|inline_code }}</div>{% if node.detail %}<div class="detail">{{ node.detail|inline_code }}</div>{% endif %}</div>
+{% endfor %}{% for edge in diagram.edges or [] %}<div class="edge-label{% if focus %}{% if edge.from in focus and edge.to in focus %} hot{% else %} dim{% endif %}{% endif %}" data-edge="{{ loop.index0 }}">{{ (edge.label or '')|inline_code }}</div>
+{% endfor %}</div></div>
+<script type="application/json" id="diagram-spec">{{ {"direction": diagram.direction or "right", "focus": focus, "nodes": (diagram.nodes or [])|map(attribute="id")|list, "edges": diagram.edges or []}|tojson }}</script>{% endif %}
 {% if screen.terms %}{% for term in screen.terms %}<div class="term"><strong>{{ term.term|inline_code }}</strong> — {{ term.definition|inline_code }}</div>{% endfor %}{% endif %}
 {% if image_url %}<img class="illustration" src="{{ image_url }}" alt="{{ screen.image.alt or '' }}">{% endif %}
 </section>
 <footer>{{ screen.footer or source_note }}</footer>
-</main></body></html>
+</main>
+<script>
+// Lay out a diagram in layers along its direction, with each edge label in the layer between its two nodes,
+// and scale it to the slide. render.py calls pgvideoLayout() once the fonts have loaded.
+window.pgvideoLayout = function () {
+  const host = document.querySelector('.diagram');
+  if (!host) return;
+  const spec = JSON.parse(document.getElementById('diagram-spec').textContent);
+  const stage = host.querySelector('.stage'), svg = stage.querySelector('svg');
+  const down = spec.direction === 'down', vw = window.innerWidth / 100;
+  stage.style.transform = '';
+  stage.style.width = stage.style.height = '20000px';
+  svg.querySelectorAll(':scope > path').forEach(path => path.remove());
+  // The first node with an ID is the one drawn; a repeated ID, and an edge to an unknown node, are left out.
+  const nodeEl = {};
+  stage.querySelectorAll('.node').forEach(el => {
+    if (nodeEl[el.dataset.id]) el.style.display = 'none'; else nodeEl[el.dataset.id] = el;
+  });
+  const labelEl = [...stage.querySelectorAll('.edge-label')];
+  spec.nodes = [...new Set(spec.nodes)];
+  if (!spec.nodes.length) return;
+  // main runs along the flow, cross across it.
+  const size = el => down ? {main: el.offsetHeight, cross: el.offsetWidth} : {main: el.offsetWidth, cross: el.offsetHeight};
+  const edges = spec.edges.map((edge, i) => ({...edge, i})).filter(e => {
+    const known = nodeEl[e.from] && nodeEl[e.to];
+    if (!known) labelEl[e.i].style.display = 'none';
+    return known;
+  });
+
+  // Turn the edges that close a cycle around, so every edge runs forward through the layers.
+  const seen = {}, back = new Set();
+  const visit = v => {
+    seen[v] = 1;
+    for (const e of edges) if (e.from === v && e.to !== v) {
+      if (seen[e.to] === 1) back.add(e.i); else if (!seen[e.to]) visit(e.to);
+    }
+    seen[v] = 2;
+  };
+  spec.nodes.forEach(v => { if (!seen[v]) visit(v); });
+  const flow = edges.filter(e => e.from !== e.to).map(e => back.has(e.i) ?
+    {...e, tail: e.to, head: e.from, back: true} : {...e, tail: e.from, head: e.to});
+  const rank = Object.fromEntries(spec.nodes.map(v => [v, 0]));
+  for (let pass = 0; pass < spec.nodes.length; pass++)
+    for (const e of flow) rank[e.head] = Math.max(rank[e.head], rank[e.tail] + 1);
+
+  // Nodes take the even layers; an edge passes the odd layers between them, its label in the first.
+  const items = [], node = {};
+  const add = item => { item.up = []; item.down = []; items.push(item); return item; };
+  const loop = 1.4 * vw;
+  spec.nodes.forEach(v => { node[v] = add({layer: 2 * rank[v], ...size(nodeEl[v]), el: nodeEl[v]}); });
+  // A loop sits across the flow from its node: on top of it, or to its right when the flow runs down.
+  edges.filter(e => e.from === e.to).forEach(e => {
+    const label = labelEl[e.i], extent = (down ? label.offsetWidth : label.offsetHeight) + 2.6 * loop;
+    node[e.from].loop = Math.max(node[e.from].loop || 0, extent);
+  });
+  Object.values(node).forEach(item => { item.cross += 2 * (item.loop || 0); });
+  const chains = flow.map(e => {
+    const chain = [node[e.tail]];
+    for (let layer = 2 * rank[e.tail] + 1; layer < 2 * rank[e.head]; layer++) {
+      const label = layer === 2 * rank[e.tail] + 1 ? labelEl[e.i] : null;
+      chain.push(add({layer, dummy: true, el: label, ...(label ? size(label) : {main: 0, cross: 0})}));
+    }
+    chain.push(node[e.head]);
+    for (let k = 1; k < chain.length; k++) { chain[k].up.push(chain[k - 1]); chain[k - 1].down.push(chain[k]); }
+    return {e, chain};
+  });
+  const layers = Array.from({length: Math.max(...items.map(item => item.layer)) + 1}, () => []);
+  items.forEach(item => layers[item.layer].push(item));
+  layers.forEach(layer => layer.forEach((item, k) => { item.pos = k; }));
+
+  // Order each layer by the mean position of its neighbours, sweeping down and up.
+  const sweeps = (count, step) => {
+    for (let sweep = 0; sweep < count; sweep++) {
+      const downward = sweep % 2 === 0;
+      for (const layer of downward ? layers : [...layers].reverse()) if (layer.length) step(layer, downward);
+    }
+  };
+  const mean = (list, key) => list.reduce((sum, item) => sum + item[key], 0) / list.length;
+  sweeps(8, (layer, downward) => {
+    layer.forEach(item => {
+      const near = downward ? item.up : item.down;
+      item.bary = near.length ? mean(near, 'pos') : item.pos;
+    });
+    layer.sort((p, q) => p.bary - q.bary || p.pos - q.pos).forEach((item, k) => { item.pos = k; });
+  });
+
+  // Place each layer across the flow: near its neighbours, never overlapping.
+  const gap = (p, q) => (p.dummy && !p.el) || (q.dummy && !q.el) ? 1.2 * vw : 2.2 * vw;
+  const pack = (layer, want) => {
+    let prev = null;
+    layer.forEach((item, k) => {
+      const min = prev ? prev.c + prev.cross / 2 + gap(prev, item) + item.cross / 2 : -Infinity;
+      item.c = Math.max(want ? want[k] : (prev ? min : item.cross / 2), min);
+      prev = item;
+    });
+    if (want) {
+      const shift = layer.reduce((sum, item, k) => sum + want[k] - item.c, 0) / layer.length;
+      layer.forEach(item => { item.c += shift; });
+    }
+  };
+  layers.forEach(layer => {
+    if (!layer.length) return;
+    pack(layer);
+    const last = layer[layer.length - 1], middle = (last.c + last.cross / 2) / 2;
+    layer.forEach(item => { item.c -= middle; });
+  });
+  sweeps(12, (layer, downward) => pack(layer, layer.map(item => {
+    const near = (downward ? item.up : item.down).length ? (downward ? item.up : item.down) : item.up.concat(item.down);
+    return near.length ? mean(near, 'c') : item.c;
+  })));
+
+  // Place the layers along the flow.
+  let along = 0;
+  layers.forEach(layer => {
+    if (!layer.length) return;
+    const extent = Math.max(...layer.map(item => item.main));
+    layer.forEach(item => { item.m = along + extent / 2; });
+    along += extent + 1.6 * vw;
+  });
+  const lowC = Math.min(...items.map(item => item.c - item.cross / 2));
+  const highC = Math.max(...items.map(item => item.c + item.cross / 2));
+  const pad = 0.6 * vw;
+  items.forEach(item => { item.c += pad - lowC; item.m += pad; });
+  const width = (down ? highC - lowC : along - 1.6 * vw) + 2 * pad;
+  const height = (down ? along - 1.6 * vw : highC - lowC) + 2 * pad;
+  const point = (m, c) => down ? [c, m] : [m, c];
+  items.forEach(item => {
+    if (!item.el) return;
+    const [x, y] = point(item.m, item.c);
+    item.el.style.left = `${x - item.el.offsetWidth / 2}px`;
+    item.el.style.top = `${y - item.el.offsetHeight / 2}px`;
+  });
+
+  // Draw each edge through its layers; a turned edge draws its arrow at the start.
+  const focus = new Set(spec.focus);
+  const draw = (d, e, extra) => {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const hot = focus.size && focus.has(e.from) && focus.has(e.to);
+    path.setAttribute('d', d);
+    path.setAttribute('class', [e.style === 'dashed' ? 'dashed' : '', hot ? 'hot' : '',
+                                focus.size && !hot ? 'dim' : ''].join(' ').trim());
+    path.setAttribute(extra, `url(#${hot ? 'arrow-hot' : 'arrow'})`);
+    svg.appendChild(path);
+  };
+  for (const {e, chain} of chains) {
+    let [x, y] = point(chain[0].m + chain[0].main / 2, chain[0].c), d = `M${x},${y}`;
+    chain.slice(1).forEach((item, k) => {
+      const [x2, y2] = point(item.m - item.main / 2, item.c), half = down ? (y2 - y) / 2 : (x2 - x) / 2;
+      d += down ? ` C${x},${y + half} ${x2},${y2 - half} ${x2},${y2}` : ` C${x + half},${y} ${x2 - half},${y2} ${x2},${y2}`;
+      [x, y] = point(item.m + item.main / 2, item.c);
+      if (k < chain.length - 2) d += ` L${x},${y}`;
+    });
+    draw(d, e, e.back ? 'marker-start' : 'marker-end');
+  }
+  // An edge from a node to itself loops out of the node's side, its label past the loop.
+  for (const e of edges.filter(e => e.from === e.to)) {
+    const item = node[e.from], label = labelEl[e.i], r = loop;
+    const [x, y] = point(item.m, item.c);
+    if (down) {
+      const side = x + item.el.offsetWidth / 2;
+      draw(`M${side},${y - r} C${side + 3 * r},${y - r} ${side + 3 * r},${y + r} ${side},${y + r}`, e, 'marker-end');
+      label.style.left = `${side + 2.6 * r}px`;
+      label.style.top = `${y - label.offsetHeight / 2}px`;
+    } else {
+      const top = y - item.el.offsetHeight / 2;
+      draw(`M${x - r},${top} C${x - r},${top - 3 * r} ${x + r},${top - 3 * r} ${x + r},${top}`, e, 'marker-end');
+      label.style.left = `${x - label.offsetWidth / 2}px`;
+      label.style.top = `${top - 2.6 * r - label.offsetHeight}px`;
+    }
+  }
+
+  // Fit the drawing to the slide.
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  stage.style.width = `${width}px`;
+  stage.style.height = `${height}px`;
+  const scale = Math.min(1.25, host.clientWidth / width, host.clientHeight / height);
+  stage.style.transform = `translate(${(host.clientWidth - width * scale) / 2}px, ` +
+                          `${(host.clientHeight - height * scale) / 2}px) scale(${scale})`;
+  host.dataset.scale = scale.toFixed(3);
+};
+if (document.fonts) document.fonts.ready.then(() => window.pgvideoLayout());
+</script>
+</body></html>

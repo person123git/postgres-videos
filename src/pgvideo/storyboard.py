@@ -7,9 +7,8 @@ pgvideo does not compare it with any document and does not judge what it says.
 Importing a storyboard checks its structure, gives every sentence an ID, derives
 the text Kokoro speaks from the display text with pronunciation/en.yaml (unless a
 sentence supplies its own), and estimates the length. The only issues reported
-are the ones narration and rendering depend on: text Kokoro cannot say, a diagram
-edge without its nodes, an image that is not in the project, and screens too
-dense to read. runs/<id>/storyboard.json holds the result and script.md renders
+are the ones narration and rendering depend on: text Kokoro cannot say and an
+image that is not in the project. runs/<id>/storyboard.json holds the result and script.md renders
 it for reading; script.md is delivered as the transcript.
 """
 
@@ -31,18 +30,8 @@ STORYBOARD = "storyboard.json"
 SCRIPT = "script.md"
 SEVERITIES = ("blocking", "warning", "note")
 LAYOUTS = ("title", "question", "bullets", "steps", "code", "table", "diagram", "terms", "image", "credits")
-# What a layout shows besides its heading and lines.
-LAYOUT_CONTENT = {"code": "code", "table": "table", "diagram": "diagram", "terms": "terms", "image": "image"}
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
 
-# Screen sizes that stay readable; larger screens are reported, not refused.
-MAX_SCREEN_LINES = 5
-MAX_LINE_CHARS = 180
-MAX_HEADING_CHARS = 80
-MAX_CODE_LINES = 16
-MAX_CODE_WIDTH = 90
-MAX_TABLE_ROWS = 6
-MAX_TABLE_COLUMNS = 5
 # Used only to estimate length; narration inserts and measures the real pauses.
 WORDS_PER_MINUTE = 150
 SENTENCE_PAUSE = 0.35
@@ -201,50 +190,14 @@ class _Storyboard:
 
     def _screen(self, where: str, scene: str, screen: dict) -> dict:
         layout = screen["layout"]
-        needed = LAYOUT_CONTENT.get(layout)
-        if needed and not screen.get(needed):
-            raise ValueError(f"{where}: a {layout} layout needs screen.{needed}.")
         result = {"layout": layout, "heading": screen.get("heading") or "", "lines": list(screen.get("lines", []))}
         for key in ("footer", "code", "table", "diagram", "terms"):
             if screen.get(key):
                 result[key] = screen[key]
         issue = {"scene": scene}
-        if len(_plain(result["heading"])) > MAX_HEADING_CHARS * (2 if layout == "title" else 1):
-            self.issue("warning", "long_heading", f"The screen heading is longer than {MAX_HEADING_CHARS} "
-                                                  "characters.", **issue)
-        if len(result["lines"]) > MAX_SCREEN_LINES:
-            self.issue("warning", "dense_screen", f"The screen has {len(result['lines'])} lines; split the scene "
-                                                  f"to keep {MAX_SCREEN_LINES} or fewer.", **issue)
-        for line in result["lines"]:
-            if len(_plain(line)) > MAX_LINE_CHARS and layout not in ("question", "credits"):
-                self.issue("warning", "long_line", f"A screen line is longer than {MAX_LINE_CHARS} characters: "
-                                                   f"{_plain(line)[:60]}…", **issue)
-        if code := result.get("code"):
-            shown = code["content"].rstrip("\n").split("\n")
-            if len(shown) > MAX_CODE_LINES:
-                self.issue("warning", "long_code", f"The code excerpt has {len(shown)} lines; at most "
-                                                   f"{MAX_CODE_LINES} stay readable.", **issue)
-            if any(len(line.expandtabs(4)) > MAX_CODE_WIDTH for line in shown):
-                self.issue("warning", "wide_code", f"A code line is wider than {MAX_CODE_WIDTH} characters and may "
-                                                   "be cropped or wrapped.", **issue)
-        if table := result.get("table"):
-            if len(table["rows"]) > MAX_TABLE_ROWS:
-                self.issue("warning", "dense_table", f"The table shows {len(table['rows'])} rows; split it to keep "
-                                                     f"{MAX_TABLE_ROWS} or fewer.", **issue)
-            if len(table["header"]) > MAX_TABLE_COLUMNS:
-                self.issue("warning", "dense_table", f"The table has {len(table['header'])} columns; more than "
-                                                     f"{MAX_TABLE_COLUMNS} may be unreadable.", **issue)
-        if diagram := result.get("diagram"):
-            ids = {node["id"] for node in diagram["nodes"]}
-            for edge in diagram["edges"]:
-                if edge["from"] not in ids or edge["to"] not in ids:
-                    self.issue("blocking", "diagram_edge", f"A diagram edge joins unknown nodes {edge['from']} and "
-                                                           f"{edge['to']}.", **issue)
         if image := screen.get("image"):
             result["image"] = {"path": image["path"], "alt": image.get("alt") or "",
                                "sha256": self._image(image["path"], issue)}
-        if layout in ("bullets", "steps", "question") and not result["lines"]:
-            self.issue("note", "empty_screen", "The screen has no text lines.", **issue)
         return result
 
     def _image(self, path: str, issue: dict) -> str | None:
@@ -271,20 +224,23 @@ def _visual(screen: dict) -> str:
                                                if screen["lines"] else ".")
     if layout == "question":
         return f"The question under the heading “{heading}”."
-    if layout == "terms":
+    if screen.get("terms"):
         return "Term cards for " + ", ".join(t["term"] for t in screen["terms"]) + ", each with its definition."
-    if layout == "code":
+    if screen.get("code"):
         count = screen["code"]["content"].rstrip("\n").count("\n") + 1
         return f"{(screen['code'].get('language') or 'Code').upper()} excerpt of {count} line(s) under “{heading}”."
-    if layout == "table":
+    if screen.get("table"):
         table = screen["table"]
         return f"Table with {len(table['rows'])} row(s): {', '.join(_plain(h) for h in table['header'])}."
-    if layout == "diagram":
+    if screen.get("diagram"):
         diagram = screen["diagram"]
-        labels = {node["id"]: _plain(node["label"]) for node in diagram["nodes"]}
-        return "Diagram: " + "; ".join(f"{labels.get(e['from'], e['from'])} {e['label']} "
-                                       f"{labels.get(e['to'], e['to'])}" for e in diagram["edges"]) + "."
-    if layout == "image":
+        labels = {node["id"]: _plain(node["label"]) for node in diagram.get("nodes", [])}
+        edges = diagram.get("edges", [])
+        if not edges:
+            return "Diagram: " + (", ".join(labels.values()) or "empty") + "."
+        return "Diagram: " + "; ".join(f"{labels.get(e['from'], e['from'])} {e.get('label') or 'to'} "
+                                       f"{labels.get(e['to'], e['to'])}" for e in edges) + "."
+    if screen.get("image"):
         return f"The figure {screen['image']['path']} under “{heading}”."
     if layout == "credits":
         return "Closing slide with the sources."
@@ -369,9 +325,9 @@ def _render(record: dict) -> str:
                       "|" + "---|" * len(table["header"])]
             lines += ["| " + " | ".join(_cell(c) for c in row) + " |" for row in table["rows"]]
         if diagram := screen.get("diagram"):
-            labels = {node["id"]: node["label"] for node in diagram["nodes"]}
-            lines += [f"- {labels.get(e['from'], e['from'])} → {e['label']} → {labels.get(e['to'], e['to'])}"
-                      for e in diagram["edges"]]
+            labels = {node["id"]: node["label"] for node in diagram.get("nodes", [])}
+            lines += [f"- {labels.get(e['from'], e['from'])} → {e.get('label', '')} → {labels.get(e['to'], e['to'])}"
+                      for e in diagram.get("edges", [])]
         for term in screen.get("terms", []):
             lines.append(f"- **{term['term']}**: {term['definition']}")
         if image := screen.get("image"):
