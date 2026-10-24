@@ -18,9 +18,9 @@ schema: 1
 language: a
 
 terms:
-  PostgreSQL: POST-gres-Q-L
-  Postgres: POST-gres
-  postgres: POST-gres
+  PostgreSQL: Post-gress
+  Postgres: Post-gress
+  postgres: Post-gress
   psql: P-S-Q-L
   SQL: S-Q-L
   GUC: G U C
@@ -182,7 +182,7 @@ parts:
   len: len
   cliplen: clip len
   mbcliplen: M B clip len
-  postgresql: Postgres Q L
+  postgresql: Post-gress
   qtext: Q text
   sourcetext: source text
   fsync: F sync
