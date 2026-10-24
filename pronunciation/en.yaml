@@ -22,6 +22,7 @@ terms:
   Postgres: Post-gress
   postgres: Post-gress
   psql: P-S-Q-L
+  postgresql.conf: Post-gress config
   SQL: S-Q-L
   GUC: G U C
   # The plural needs its own form: Kokoro reads "G U Cs" as "G U C S".

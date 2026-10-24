@@ -73,6 +73,13 @@ taught clearly, without padding. When a video would run over 30 minutes, propose
     ("in PostgreSQL 17"), a contrast with something that is not PostgreSQL, or a proper name such as a source
     file or setting. Elsewhere, leave it out or use the specific component, such as "the planner" or
     "the server". Do not drop it where removing it would change a claim's meaning or version scope (rule 2).
+12. **Draw diagrams; never show text diagrams as they are.** This rule is mandatory. When the document explains a
+    mental model, or draws a diagram in text (ASCII boxes and arrows, call chains, decision trees, flows in a
+    `text` block), show it on screen as a real diagram: the storyboard's `diagram` layout, with nodes, labeled
+    edges, `kind`, `detail`, and `focus`, split over several scenes when one diagram would be crowded. Never
+    put the text diagram on a `code` slide or paste its characters into lines. The diagram may show only the
+    document's components, relationships, and labels (rule 1); it changes the presentation, not the content.
+    Real code, SQL, and command output stay `code` slides, copied exactly.
 
 ## The wiki: downloaded into `runs/<id>/wiki_content/`
 
@@ -263,7 +270,8 @@ plan, and the document.
 - Give every sentence that states a fact its `sources`: the document's section headings or line ranges, or
   explicitly named `glossary.md` entries or line ranges, where the fact is stated.
 - Mark a sentence `framing` only when it contains no technical claim.
-- Copy code, table rows, and glossary definitions exactly.
+- Copy code, table rows, and glossary definitions exactly. A text diagram is not code: draw it with the
+  `diagram` layout (rule 12).
 - Keep all required qualifications. Give each claim the narration it needs to be clear, without padding.
 
 Save the storyboard as `runs/<id>/scratch/storyboard.json`.
