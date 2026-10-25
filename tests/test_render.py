@@ -81,6 +81,69 @@ class RenderTests(unittest.TestCase):
         _render_slides(ROOT, run, storyboard, {"scenes": [{"frames": 1}]}, run / "render", 640, 360)
         return (run / "render/slides/001.html").read_text(encoding="utf-8")
 
+    def render_scene(self, screen, narration, timing, captions):
+        from pgvideo.render import _render_slides
+
+        temporary = tempfile.TemporaryDirectory(prefix="pgvideo-render-test-", dir=ROOT / ".runtime/tmp")
+        self.addCleanup(temporary.cleanup)
+        run = Path(temporary.name)
+        storyboard = {"title": "Sample", "document": {"path": "wiki/v18/sample.md", "version": 18}, "scenes": [
+            {"id": "s", "part": "example", "title": "Sample", "screen": screen, "narration": narration}]}
+        timeline = {"sample_rate": 24000, "scenes": [timing], "captions": captions}
+        slides = _render_slides(ROOT, run, storyboard, timeline, run / "render", 640, 360)
+        return run, slides[0]
+
+    def test_a_sentence_focus_gets_its_own_image_from_the_start_of_its_audio(self):
+        screen = {"layout": "table", "heading": "Rows", "lines": [], "table": {
+            "header": ["Name"], "rows": [["one"], ["two"], ["three"]]}}
+        # The first sentence shows the whole table; the second highlights row 2, and the third keeps it.
+        narration = [{"id": "s.n1", "text": "All."}, {"id": "s.n2", "text": "Two.", "focus": [2]},
+                     {"id": "s.n3", "text": "Still two."}]
+        captions = [{"sentence_id": "s.n1", "start_sample": 24000}, {"sentence_id": "s.n2", "start_sample": 48800},
+                    {"sentence_id": "s.n3", "start_sample": 72000}]
+        run, slide = self.render_scene(screen, narration, {"start_frame": 30, "end_frame": 120, "frames": 90},
+                                       captions)
+        self.assertEqual(slide["frames"], 90)
+        self.assertEqual([(Path(image["file"]).name, image["frames"], image.get("focus")) for image in slide["images"]],
+                         [("001.png", 31, None), ("001-2.png", 59, [2])])
+        self.assertEqual(slide["file"], slide["images"][0]["file"])
+        plain = (run / "render/slides/001.html").read_text(encoding="utf-8")
+        focused = (run / "render/slides/001-2.html").read_text(encoding="utf-8")
+        self.assertNotIn(' class="hot"', plain)
+        self.assertIn('<tr class="dim"><td>one</td></tr><tr class="hot"><td>two</td></tr>'
+                      '<tr class="dim"><td>three</td></tr>', focused)
+
+    def test_code_lines_and_diagram_nodes_take_a_focus_and_an_empty_focus_clears_it(self):
+        code = {"layout": "code", "heading": "Query", "lines": [],
+                "code": {"language": "sql", "content": "SELECT 1\nFROM t\nWHERE x;\n"}}
+        narration = [{"id": "s.n1", "text": "From.", "focus": [2, 3]}, {"id": "s.n2", "text": "All.", "focus": []}]
+        captions = [{"sentence_id": "s.n1", "start_sample": 0}, {"sentence_id": "s.n2", "start_sample": 2400}]
+        run, slide = self.render_scene(code, narration, {"start_frame": 0, "end_frame": 6, "frames": 6}, captions)
+        self.assertEqual([image["frames"] for image in slide["images"]], [3, 3])
+        self.assertIn('<code><span class="cl dim">SELECT 1</span><span class="cl hot">FROM t</span>'
+                      '<span class="cl hot">WHERE x;</span></code>',
+                      (run / "render/slides/001.html").read_text(encoding="utf-8"))
+        self.assertIn('<code><span class="cl">SELECT 1</span>',
+                      (run / "render/slides/001-2.html").read_text(encoding="utf-8"))
+        diagram = {"layout": "diagram", "heading": "Flow", "lines": [], "diagram": {
+            "focus": ["a"], "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}}
+        run, slide = self.render_scene(diagram, [{"id": "s.n1", "text": "B.", "focus": ["b"]}],
+                                       {"start_frame": 0, "end_frame": 6, "frames": 6}, captions[:1])
+        # One focus for the whole scene is one image; the sentence's focus replaces the diagram's.
+        self.assertNotIn("images", slide)
+        page = (run / "render/slides/001.html").read_text(encoding="utf-8")
+        self.assertIn('<div class="node kind-component dim" data-id="a">', page)
+        self.assertIn('<div class="node kind-component hot" data-id="b">', page)
+        terms = {"layout": "terms", "heading": "Terms", "lines": ["A line"],
+                 "terms": [{"term": "one", "definition": "the first"}, {"term": "two", "definition": "the second"}]}
+        run, slide = self.render_scene(terms, [{"id": "s.n1", "text": "Two.", "focus": [3]}],
+                                       {"start_frame": 0, "end_frame": 6, "frames": 6}, captions[:1])
+        # On a terms slide the numbers count the lines, then the terms.
+        page = (run / "render/slides/001.html").read_text(encoding="utf-8")
+        self.assertIn('<div class="line dim">A line</div>', page)
+        self.assertIn('<div class="term dim"><strong>one</strong>', page)
+        self.assertIn('<div class="term hot"><strong>two</strong>', page)
+
     def test_a_diagram_slide_draws_labelled_nodes_and_edges(self):
         page = self.render_diagram({"direction": "down", "focus": ["n1", "n2"], "nodes": [
             {"id": "n1", "label": "`pg_stat_get_activity()`", "detail": "a function"},

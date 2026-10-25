@@ -40,7 +40,7 @@ REQUEST_FIELDS = ("request_id", "created_at", "source")
 # they are left out so the same scenes keep one digest and one video.
 ESTIMATE_FIELDS = ("status", "settings", "estimate", "counts", "issues")
 MEDIA_FILE = re.compile(r"narration/(?:units/[A-Za-z0-9][A-Za-z0-9._-]*\.wav|master(?:-raw)?\.wav)"
-                        r"|render/(?:slides/\d{3,4}\.(?:png|html)|slides\.ffconcat|draft\.webm)|references\.md")
+                        r"|render/(?:slides/\d{3,4}(?:-\d+)?\.(?:png|html)|slides\.ffconcat|draft\.webm)|references\.md")
 REQUIRED_FILES = ("narration/master.wav", "narration/master-raw.wav", "render/draft.webm", "references.md")
 
 
@@ -366,9 +366,9 @@ def register(root: Path, run_dir: Path, manifest: dict, *, storyboard: dict, aud
         files = {unit["file"]: unit["sha256"] for scene in audio_map["scenes"] for unit in scene["units"]}
         for name in ("master", "raw_master"):
             files[audio_map[name]["file"]] = audio_map[name]["sha256"]
-        for slide in render["slides"]:
-            files[slide["file"]] = slide["sha256"]
-            page = Path(slide["file"]).with_suffix(".html").as_posix()
+        for image in (image for slide in render["slides"] for image in slide.get("images") or [slide]):
+            files[image["file"]] = image["sha256"]
+            page = Path(image["file"]).with_suffix(".html").as_posix()
             files[page] = _sha(_member(root, run_dir, page))
         files["render/slides.ffconcat"] = _sha(_member(root, run_dir, "render/slides.ffconcat"))
         files[render["draft"]] = render["sha256"]

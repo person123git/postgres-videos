@@ -17,6 +17,7 @@ from playwright.sync_api import sync_playwright
 from .paths import project_directory, write_atomic
 from .reuse import stage_fingerprint
 from .stages import invalidate_after
+from .storyboard import code_lines, focus_items
 
 RECORD = "render.json"
 
@@ -94,6 +95,72 @@ def _check_rendered_fonts(page, scene_id: str) -> None:
         session.detach()
 
 
+def _focus_segments(scene: dict, timing: dict, timeline: dict) -> list[tuple[list | None, int]]:
+    """Split a scene's frames by the focus its sentences set; each focus starts with its sentence's audio."""
+    states, focus = [], None
+    for item in scene["narration"]:
+        focus = item.get("focus", focus)
+        states.append((item["id"], focus))
+    if all(state is None for _, state in states):
+        return [(None, timing["frames"])]
+    rate = timeline["sample_rate"]
+    starts = {}
+    for cue in timeline["captions"]:
+        starts.setdefault(cue["sentence_id"], (cue["start_sample"] * 30 + rate - 1) // rate)
+    segments: list[list] = []
+    for k, (sentence, state) in enumerate(states):
+        start = timing["start_frame"] if k == 0 else starts[sentence]
+        if segments and segments[-1][0] == state:
+            continue
+        if segments:
+            segments[-1][1] = start - segments[-1][1]
+        segments.append([state, start])
+    segments[-1][1] = timing["end_frame"] - segments[-1][1]
+    return [(state, frames) for state, frames in segments if frames > 0]
+
+
+def _render_slide(page, template, root: Path, storyboard: dict, scene: dict, marks: list | None,
+                  html_path: Path, width: int, height: int, font_url: str, mono_url: str) -> dict:
+    """Render one image of a scene's slide, with marks as the focus; return its file, SHA-256, and overflow."""
+    screen = scene["screen"]
+    image_url = _image(root, screen)
+    note = storyboard["document"]["path"]
+    html = template.render(font_url=font_url, mono_url=mono_url, layout=screen["layout"],
+                           screen=screen, title=scene["title"], part=scene["part"],
+                           version=storyboard["document"]["version"], source_note=note,
+                           image_url=image_url, marks=marks, focus_kind=focus_items(screen),
+                           code_lines=code_lines(screen["code"]["content"]) if screen.get("code") else [])
+    html_path.write_text(html, encoding="utf-8")
+    page.goto(html_path.as_uri(), wait_until="load")
+    page.evaluate("Promise.all([document.fonts.load('600 32px Inter'), document.fonts.load('400 20px NotoMono')])")
+    if not page.evaluate("document.fonts.check('600 32px Inter') && document.fonts.check('400 20px NotoMono')"):
+        raise ValueError(f"Bundled fonts failed to load in scene {scene['id']}")
+    page.evaluate("window.pgvideoLayout && window.pgvideoLayout()")
+    state = page.evaluate("""() => {
+      const all = [...document.querySelectorAll('main, h1, .content, .line, pre, table, .term, footer')];
+      const overflow = all.filter(el => el.scrollWidth > el.clientWidth + 2 ||
+        el.scrollHeight > el.clientHeight + 2).map(el => el.tagName.toLowerCase());
+      // Content that runs past the content box is clipped without scrolling.
+      const box = document.querySelector('.content').getBoundingClientRect();
+      for (const el of document.querySelectorAll('.content > *, .line, tr, .term')) {
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom > box.bottom + 2 || rect.right > box.right + 2)
+          overflow.push('clipped ' + el.tagName.toLowerCase());
+      }
+      const image = document.querySelector('img');
+      return {overflow, imageLoaded: !image || (image.complete && image.naturalWidth > 0)};
+    }""")
+    if not state["imageLoaded"]:
+        raise ValueError(f"Slide {scene['id']} has a missing image")
+    _check_rendered_fonts(page, scene["id"])
+    png = html_path.with_suffix(".png")
+    page.screenshot(path=str(png))
+    header = png.read_bytes()[:24]
+    if header[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", header[16:24]) != (width, height):
+        raise ValueError(f"Slide {scene['id']} has incorrect PNG dimensions")
+    return {"file": str(png), "sha256": _sha(png), "overflow": state["overflow"]}
+
+
 def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, render_dir: Path,
                    width: int, height: int) -> list[dict]:
     environment = Environment(loader=FileSystemLoader(root / "templates"),
@@ -118,46 +185,22 @@ def _render_slides(root: Path, run_dir: Path, storyboard: dict, timeline: dict, 
                 page.route("http://**/*", lambda route: route.abort())
                 page.route("https://**/*", lambda route: route.abort())
                 for index, (scene, timing) in enumerate(zip(storyboard["scenes"], timeline["scenes"]), 1):
-                    screen = scene["screen"]
-                    image_url = _image(root, screen)
-                    note = storyboard["document"]["path"]
-                    html = template.render(font_url=font_url, mono_url=mono_url, layout=screen["layout"],
-                                           screen=screen, title=scene["title"], part=scene["part"],
-                                           version=storyboard["document"]["version"], source_note=note,
-                                           image_url=image_url)
-                    html_path = slides_dir / f"{index:03d}.html"
-                    html_path.write_text(html, encoding="utf-8")
-                    page.goto(html_path.as_uri(), wait_until="load")
-                    page.evaluate("Promise.all([document.fonts.load('600 32px Inter'), document.fonts.load('400 20px NotoMono')])")
-                    if not page.evaluate("document.fonts.check('600 32px Inter') && document.fonts.check('400 20px NotoMono')"):
-                        raise ValueError(f"Bundled fonts failed to load in scene {scene['id']}")
-                    page.evaluate("window.pgvideoLayout && window.pgvideoLayout()")
-                    state = page.evaluate("""() => {
-                      const all = [...document.querySelectorAll('main, h1, .content, .line, pre, table, .term, footer')];
-                      const overflow = all.filter(el => el.scrollWidth > el.clientWidth + 2 ||
-                        el.scrollHeight > el.clientHeight + 2).map(el => el.tagName.toLowerCase());
-                      // Content that runs past the content box is clipped without scrolling.
-                      const box = document.querySelector('.content').getBoundingClientRect();
-                      for (const el of document.querySelectorAll('.content > *, .line, tr, .term')) {
-                        const rect = el.getBoundingClientRect();
-                        if (rect.bottom > box.bottom + 2 || rect.right > box.right + 2)
-                          overflow.push('clipped ' + el.tagName.toLowerCase());
-                      }
-                      const image = document.querySelector('img');
-                      return {overflow, imageLoaded: !image || (image.complete && image.naturalWidth > 0)};
-                    }""")
-                    if not state["imageLoaded"]:
-                        raise ValueError(f"Slide {scene['id']} has a missing image")
-                    _check_rendered_fonts(page, scene["id"])
-                    png = slides_dir / f"{index:03d}.png"
-                    page.screenshot(path=str(png))
-                    header = png.read_bytes()[:24]
-                    if header[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", header[16:24]) != (width, height):
-                        raise ValueError(f"Slide {scene['id']} has incorrect PNG dimensions")
+                    images = []
+                    for k, (marks, frames) in enumerate(_focus_segments(scene, timing, timeline), 1):
+                        name = f"{index:03d}" if k == 1 else f"{index:03d}-{k}"
+                        images.append({**_render_slide(page, template, root, storyboard, scene, marks,
+                                                       slides_dir / f"{name}.html", width, height,
+                                                       font_url, mono_url),
+                                       "frames": frames, **({"focus": marks} if marks is not None else {})})
+                    for image in images:
+                        image["file"] = str(Path(image["file"]).relative_to(run_dir))
+                    first = images[0]
                     # Content that does not fit is recorded, not refused.
-                    results.append({"id": scene["id"], "file": str(png.relative_to(run_dir)),
-                                    "sha256": _sha(png), "frames": timing["frames"],
-                                    **({"overflow": state["overflow"]} if state["overflow"] else {})})
+                    overflow = [item for image in images for item in image.pop("overflow")]
+                    results.append({"id": scene["id"], "file": first["file"], "sha256": first["sha256"],
+                                    "frames": timing["frames"],
+                                    **({"images": images} if len(images) > 1 else {}),
+                                    **({"overflow": list(dict.fromkeys(overflow))} if overflow else {})})
             finally:
                 context.close()
     return results
@@ -195,9 +238,11 @@ def create_render(root: Path, run_dir: Path, *, crf: int = 40, audio_bitrate: in
         concat = render_dir / "slides.ffconcat"
         lines = ["ffconcat version 1.0"]
         for slide in slides:
-            lines += [f"file 'slides/{Path(slide['file']).name}'", "option framerate 30",
-                      f"duration {slide['frames'] / 30:.9f}"]
-        lines += [f"file 'slides/{Path(slides[-1]['file']).name}'", "option framerate 30"]
+            for image in slide.get("images") or [slide]:
+                lines += [f"file 'slides/{Path(image['file']).name}'", "option framerate 30",
+                          f"duration {image['frames'] / 30:.9f}"]
+        last = (slides[-1].get("images") or [slides[-1]])[-1]
+        lines += [f"file 'slides/{Path(last['file']).name}'", "option framerate 30"]
         concat.write_text("\n".join(lines) + "\n", encoding="utf-8")
         references = _references(storyboard)
         write_atomic(root, run_dir.relative_to(root) / "references.md", references.encode(), label="Request")

@@ -80,6 +80,14 @@ taught clearly, without padding. When a video would run over 30 minutes, propose
     put the text diagram on a `code` slide or paste its characters into lines. The diagram may show only the
     document's components, relationships, and labels (rule 1); it changes the presentation, not the content.
     Real code, SQL, and command output stay `code` slides, copied exactly.
+13. **Show what each sentence is about.** When a slide holds several items and the narration takes them in turn,
+    give each sentence a `focus` naming the items it talks about: bullets, steps, and table rows by their number,
+    counting from 1, and on a `terms` slide its lines and then its terms; code lines as a number or a range such as
+    `3-7`; diagram nodes by their IDs. While the sentence plays, the slide highlights those items and dims the rest.
+    A focus lasts until a later sentence in the same scene sets another, and `"focus": []` clears it for a sentence
+    about the whole slide. A sentence's focus replaces the diagram's scene-wide `focus`. Highlight the items the
+    sentence names; do not point with arrows or add marks to the slide. Focus changes only what is emphasized, never
+    the content (rule 1).
 
 ## The wiki: downloaded into `runs/<id>/wiki_content/`
 

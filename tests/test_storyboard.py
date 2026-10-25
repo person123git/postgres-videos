@@ -47,6 +47,27 @@ class StoryboardTests(unittest.TestCase):
     def scene(board: dict, identifier: str) -> dict:
         return next(scene for scene in board["scenes"] if scene["id"] == identifier)
 
+    def test_a_sentence_focus_is_normalized_and_a_missing_item_is_a_warning(self):
+        def change(board):
+            answer, diagram = self.scene(board, "answer"), self.scene(board, "read-path")
+            answer["narration"][0]["focus"] = [1]
+            answer["narration"][1]["focus"] = ["2-3", 2]
+            diagram["narration"][0]["focus"] = ["function", "absent"]
+        entry, record = self.changed(change)
+        answer = self.scene(record, "answer")["narration"]
+        self.assertEqual([item["focus"] for item in answer], [[1], [2, 3]])
+        self.assertEqual(self.scene(record, "read-path")["narration"][0]["focus"], ["function", "absent"])
+        self.assertNotIn("focus", self.scene(record, "steps")["narration"][0])
+        # Naming something the slide does not have is a warning; the build goes on.
+        self.assertEqual(entry["status"], "passed")
+        self.assertEqual([(i["narration"], i["code"]) for i in record["issues"]],
+                         [("answer.n2", "focus_not_on_slide"), ("read-path.n1", "focus_not_on_slide")])
+
+    def test_a_focus_that_is_not_an_item_number_or_range_is_refused(self):
+        for token in ("first", "0", "5-3", "2-x"):
+            with self.subTest(token=token), self.assertRaisesRegex(ValueError, "is not an item number or a range"):
+                self.changed(lambda board: self.scene(board, "answer")["narration"][0].update(focus=[token]))
+
     def test_a_storyboard_is_prepared_for_narration_and_rendering(self):
         entry, record = self.imported(storyboard())
         self.assertEqual((entry["status"], record["status"], record["issues"]), ("passed", "passed", []))

@@ -8,7 +8,8 @@ Importing a storyboard checks its structure, gives every sentence an ID, derives
 the text Kokoro speaks from the display text with pronunciation/en.yaml (unless a
 sentence supplies its own), and estimates the length. The only issues reported
 are the ones narration and rendering depend on: text Kokoro cannot say and an
-image that is not in the project. runs/<id>/storyboard.json holds the result and script.md renders
+image that is not in the project, and, as warnings, a sentence focus that names
+nothing on its slide. runs/<id>/storyboard.json holds the result and script.md renders
 it for reading; script.md is delivered as the transcript.
 """
 
@@ -39,6 +40,32 @@ SCENE_PAUSE = 0.8
 # Measured speech needs at least this much audio before it replaces the default rate.
 MIN_MEASURED_SECONDS = 60
 MAX_MEASURED_RUNS = 30
+
+
+def focus_items(screen: dict) -> str:
+    """Return what a sentence's focus picks out on a screen: code lines, table rows, nodes, or lines.
+
+    On a screen with terms, the numbers count its lines and then its terms, in the order the slide shows them.
+    """
+    for key in ("terms", "code", "table", "diagram"):
+        if screen.get(key):
+            return key
+    return "lines"
+
+
+def _item_count(screen: dict, kind: str) -> int:
+    if kind == "code":
+        return len(code_lines(screen["code"]["content"]))
+    if kind == "table":
+        return len(screen["table"]["rows"])
+    if kind == "terms":
+        return len(screen.get("lines") or []) + len(screen["terms"])
+    return len(screen.get(kind) or [])
+
+
+def code_lines(content: str) -> list[str]:
+    """Split code into the lines a focus counts; a final newline does not start another line."""
+    return content.removesuffix("\n").split("\n")
 
 
 def _plain(text: str) -> str:
@@ -162,7 +189,7 @@ class _Storyboard:
     def _scene(self, number: int, scene: dict) -> dict:
         identifier = scene["id"]
         screen = self._screen(f"Scene {number} ({identifier})", identifier, scene["screen"])
-        items = [self._narration(identifier, f"{identifier}.n{k}", item)
+        items = [self._narration(identifier, f"{identifier}.n{k}", item, screen)
                  for k, item in enumerate(scene["narration"], 1)]
         sources = list(scene.get("sources", []))
         for item in items:
@@ -174,7 +201,7 @@ class _Storyboard:
                 "sources": sources, "citations": [dict(citation) for citation in scene.get("citations", [])],
                 "words": words, "estimated_seconds": round(seconds, 1)}
 
-    def _narration(self, scene: str, identifier: str, item: dict) -> dict:
+    def _narration(self, scene: str, identifier: str, item: dict, screen: dict) -> dict:
         text = " ".join(item["text"].split())
         manual = item.get("tts_source") == "manual"
         if manual and not (item.get("tts") or "").strip():
@@ -184,9 +211,37 @@ class _Storyboard:
             self.issue("blocking", "unspeakable_tts", f"The TTS text contains {', '.join(bad)}, which Kokoro would "
                                                       "read aloud or drop.", scene=scene, narration=identifier,
                        action="Add a pronunciation to pronunciation/en.yaml or write tts with tts_source: manual.")
+        focus = self._focus(scene, identifier, item["focus"], screen) if "focus" in item else None
         return {"id": identifier, "text": text, "tts": tts, "tts_source": "manual" if manual else "dictionary",
                 **({"origin": item["origin"]} if item.get("origin") else {}),
+                **({"focus": focus} if focus is not None else {}),
                 "sources": list(item.get("sources", [])), "words": round(spoken_words(tts), 1)}
+
+    def _focus(self, scene: str, identifier: str, focus: list, screen: dict) -> list:
+        """Normalize a sentence's focus: node IDs on a diagram, otherwise the sorted item numbers."""
+        kind = focus_items(screen)
+        if kind == "diagram":
+            names = [str(name) for name in focus]
+            known = {node["id"] for node in screen["diagram"].get("nodes", [])}
+            unknown = [name for name in names if name not in known]
+            result: list = list(dict.fromkeys(names))
+        else:
+            numbers: set[int] = set()
+            for token in focus:
+                first, _, last = str(token).partition("-")
+                if not (first.isdigit() and (not last or last.isdigit())) or int(first) < 1 or \
+                        (last and int(last) < int(first)):
+                    raise ValueError(f"Sentence {identifier}: focus {token!r} is not an item number or a range "
+                                     "such as 3-7.")
+                numbers.update(range(int(first), int(last or first) + 1))
+            count = _item_count(screen, kind)
+            unknown = [str(number) for number in sorted(numbers) if number > count]
+            result = sorted(numbers)
+        if unknown:
+            self.issue("warning", "focus_not_on_slide", f"The focus names {', '.join(unknown)}, which the slide "
+                                                       f"does not have among its {kind}.", scene=scene,
+                       narration=identifier, action="Name the items the sentence is about.")
+        return result
 
     def _screen(self, where: str, scene: str, screen: dict) -> dict:
         layout = screen["layout"]

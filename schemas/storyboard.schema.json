@@ -51,6 +51,8 @@
         "origin": {"enum": ["document", "table", "glossary", "paraphrase", "framing"],
                    "description": "Where the sentence comes from; framing introduces, connects, or closes and carries no technical claim"},
         "sources": {"$ref": "#/$defs/strings", "description": "Where the sentence's fact is stated: document section headings or line ranges, or explicitly named glossary.md entries or line ranges"},
+        "focus": {"type": "array", "items": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "minLength": 1}]},
+                  "description": "What the sentence is about, highlighted with the rest dimmed while it plays: bullets, steps, and table rows by number from 1, and on a terms slide its lines and then its terms; code lines by number or a range such as \"3-7\"; diagram nodes by ID. It lasts until a later sentence in the scene sets another; [] clears it. On a diagram it replaces the scene-wide focus"},
         "tts": {"type": "string", "minLength": 1, "maxLength": 1200, "description": "What Kokoro reads, only with tts_source manual"},
         "tts_source": {"enum": ["dictionary", "manual"], "description": "dictionary (the default) derives the spoken text from pronunciation/en.yaml"}
       }

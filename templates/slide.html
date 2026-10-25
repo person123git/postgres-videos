@@ -41,25 +41,37 @@ th { color: #9de5f8; background: #233e52; text-align: left; }
 .edge-label.hot { color: #ffe3a8; }
 .diagram .node.dim, .diagram path.dim { opacity: .3; }
 .edge-label.dim, .edge-label.dim code { color: #4f6577; }
+.cl { display: block; min-height: 1.3em; }
+/* A sentence's focus: its items are highlighted and the others dimmed, without moving anything. */
+/* The tint reaches sideways only, so neighbouring highlighted lines do not overlap. */
+.line.hot, .cl.hot { background: rgba(255, 210, 122, .14);
+                     box-shadow: -.5vw 0 0 rgba(255, 210, 122, .14), .5vw 0 0 rgba(255, 210, 122, .14); }
+.term.hot { background: rgba(255, 210, 122, .14); }
+.line.hot, .term.hot { border-radius: .3vw; }
+.line.hot:before { color: #ffd27a; }
+.term.hot { box-shadow: 0 0 0 .3vw rgba(255, 210, 122, .55); }
+tr.hot td { background: rgba(255, 210, 122, .14); border-color: #ffd27a; }
+.line.dim, .cl.dim, .term.dim, tr.dim td { opacity: .35; }
 .term { font-size: 1.6vw; line-height: 1.28; padding: .55em; background: #19354a; border-radius: .4vw; }
 .term strong { color: #9de5f8; }
 .illustration { max-width: 100%; max-height: 100%; object-fit: contain; align-self: center; }
 footer { border-top: 1px solid #496176; padding-top: 1%; color: #a9bdca; font-size: 1.05vw; overflow-wrap: anywhere; }
 </style></head><body>
+{% macro mark(kind, number) %}{% if marks is not none and kind == focus_kind and marks %}{% if number in marks %} hot{% else %} dim{% endif %}{% endif %}{% endmacro %}
 <main class="slide layout-{{ layout }}">
 <div class="kicker">PostgreSQL {{ version }} · {{ part|replace('_', ' ') }}</div>
 <h1>{{ (screen.heading or title)|inline_code }}</h1>
 <section class="content">
-{% if screen.lines %}{% for line in screen.lines %}<div class="line">{{ line|inline_code }}</div>{% endfor %}{% endif %}
-{% if screen.code %}<pre><code>{{ screen.code.content }}</code></pre>{% endif %}
-{% if screen.table %}<div class="table-wrap"><table><thead><tr>{% for cell in screen.table.header %}<th>{{ cell|inline_code }}</th>{% endfor %}</tr></thead><tbody>{% for row in screen.table.rows %}<tr>{% for cell in row %}<td>{{ cell|inline_code }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% endif %}
-{% if screen.diagram %}{% set diagram = screen.diagram %}{% set focus = diagram.focus or [] %}<div class="diagram"><div class="stage">
+{% if screen.lines %}{% for line in screen.lines %}<div class="line{{ mark('terms' if focus_kind == 'terms' else 'lines', loop.index) }}">{{ line|inline_code }}</div>{% endfor %}{% endif %}
+{% if screen.code %}<pre><code>{% for line in code_lines %}<span class="cl{{ mark('code', loop.index) }}">{{ line }}</span>{% endfor %}</code></pre>{% endif %}
+{% if screen.table %}<div class="table-wrap"><table><thead><tr>{% for cell in screen.table.header %}<th>{{ cell|inline_code }}</th>{% endfor %}</tr></thead><tbody>{% for row in screen.table.rows %}<tr{% if mark('table', loop.index)|trim %} class="{{ mark('table', loop.index)|trim }}"{% endif %}>{% for cell in row %}<td>{{ cell|inline_code }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% endif %}
+{% if screen.diagram %}{% set diagram = screen.diagram %}{% set focus = (marks if marks is not none else diagram.focus) or [] %}<div class="diagram"><div class="stage">
 <svg class="edges"><defs>{% for name in ('arrow', 'arrow-hot') %}<marker id="{{ name }}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>{% endfor %}</defs></svg>
 {% for node in diagram.nodes or [] %}<div class="node kind-{{ node.kind or 'component' }}{% if focus %}{% if node.id in focus %} hot{% else %} dim{% endif %}{% endif %}" data-id="{{ node.id }}"><div class="label">{{ node.label|inline_code }}</div>{% if node.detail %}<div class="detail">{{ node.detail|inline_code }}</div>{% endif %}</div>
 {% endfor %}{% for edge in diagram.edges or [] %}<div class="edge-label{% if focus %}{% if edge.from in focus and edge.to in focus %} hot{% else %} dim{% endif %}{% endif %}" data-edge="{{ loop.index0 }}">{{ (edge.label or '')|inline_code }}</div>
 {% endfor %}</div></div>
 <script type="application/json" id="diagram-spec">{{ {"direction": diagram.direction or "right", "focus": focus, "nodes": (diagram.nodes or [])|map(attribute="id")|list, "edges": diagram.edges or []}|tojson }}</script>{% endif %}
-{% if screen.terms %}{% for term in screen.terms %}<div class="term"><strong>{{ term.term|inline_code }}</strong> — {{ term.definition|inline_code }}</div>{% endfor %}{% endif %}
+{% if screen.terms %}{% for term in screen.terms %}<div class="term{{ mark('terms', (screen.lines or [])|length + loop.index) }}"><strong>{{ term.term|inline_code }}</strong> — {{ term.definition|inline_code }}</div>{% endfor %}{% endif %}
 {% if image_url %}<img class="illustration" src="{{ image_url }}" alt="{{ screen.image.alt or '' }}">{% endif %}
 </section>
 <footer>{{ screen.footer or source_note }}</footer>
