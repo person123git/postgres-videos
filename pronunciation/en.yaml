@@ -44,6 +44,8 @@ terms:
   VXID: V X I D
   LSN: L S N
   TID: T I D
+  # The plural needs its own form, as GUCs does.
+  TIDs: T I D's
   ctid: C T I D
   SLRU: S L R U
   TOAST: toast
@@ -157,6 +159,13 @@ terms:
   22P02: two two P zero two
   25P01: two five P zero one
   42P10: four two P one zero
+  58P01: five eight P zero one
+  0A000: zero A zero zero zero
+  XX002: X X zero zero two
+  amcheck: A M check
+  heapallindexed: heap all indexed
+  rootdescend: root descend
+  infomask: info mask
   limitXmin: limit x min
   "17.11": 17 point 11
   userid: user I D
@@ -192,6 +201,11 @@ parts:
   lsn: L S N
   oid: O I D
   tid: T I D
+  tids: T I D's
+  btree: B tree
+  nbtree: N B tree
+  waldump: wall dump
+  verifybackup: verify backup
   mb: M B
   shmem: shared mem
   cmd: command
