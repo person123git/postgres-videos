@@ -32,10 +32,15 @@ terms:
   OID: O I D
   # The plural needs its own form, as GUCs does.
   OIDs: O I D's
+  IDs: I D's
   XID: X I D
   xmin: x min
+  xmax: x max
   int4: int 4
   int8: int 8
+  bigint: big int
+  # Lowercase "read committed" is read as the past tense "red".
+  read committed: Read Committed
   VXID: V X I D
   LSN: L S N
   TID: T I D
@@ -131,6 +136,27 @@ terms:
   indislive: ind is live
   indimmediate: ind immediate
   relispartition: rel is partition
+  relispopulated: rel is populated
+  relkind: rel kind
+  relam: rel A M
+  relnamespace: rel namespace
+  indcheckxmin: ind check x min
+  TransactionXmin: transaction x min
+  amgettuple: A M get tuple
+  pg_am: P G A M
+  pageinspect: page inspect
+  BYPASSRLS: bypass R L S
+  SQLSTATE: S Q L state
+  # SQLSTATE codes are read character by character.
+  "01000": zero one zero zero zero
+  "0xFF": hex F F
+  # The warning class.
+  "01": zero one
+  XX001: X X zero zero one
+  55P03: five five P zero three
+  22P02: two two P zero two
+  25P01: two five P zero one
+  42P10: four two P one zero
   limitXmin: limit x min
   "17.11": 17 point 11
   userid: user I D
@@ -228,6 +254,7 @@ parts:
   sgml: S G M L
   ccnew: C C new
   ccold: C C old
+  indexdef: index def
 
 abbreviations:
   e.g.: for example
