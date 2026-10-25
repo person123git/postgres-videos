@@ -88,6 +88,26 @@ taught clearly, without padding. When a video would run over 30 minutes, propose
     about the whole slide. A sentence's focus replaces the diagram's scene-wide `focus`. Highlight the items the
     sentence names; do not point with arrows or add marks to the slide. Focus changes only what is emphasized, never
     the content (rule 1).
+14. **Explain an exhibit while it is on screen.** An exhibit is anything the document shows and then explains part
+    by part: a query plan, code, SQL, command output, a configuration excerpt, a table, a formula, or a text
+    diagram (drawn as a diagram, rule 12). The explanation may be a numbered or bulleted list, a lead-in such as
+    "Read it top-down, one node at a time:", or paragraphs that take the exhibit's parts in turn, before or after
+    it. Narrate that explanation over the exhibit itself:
+    - Keep the exhibit on screen, in its own layout (`code`, `table`, or `diagram`) and copied exactly, for every
+      sentence that explains it. When the explanation is long, split it over consecutive scenes that repeat the same
+      exhibit; do not move it to `steps` or `bullets` slides that restate the parts away from the exhibit.
+    - Narrate the parts in the document's order, using its lead-in as the transition, and give each sentence a
+      `focus` on the parts it explains (rule 13): code lines, table rows, or diagram nodes. The viewer should see
+      where each number, name, or value comes from.
+    - The explanation is the home of those facts (rule 8): keep every number, condition, and reason it gives.
+    - A sentence about something the exhibit does not show, such as an absent line or what another case would print,
+      takes `"focus": []`.
+    - A short exhibit that the document only shows, without explaining its parts, needs no walkthrough.
+
+    For example, a twelve-line `EXPLAIN` plan followed by "Read it top-down, one node at a time:" and items for the
+    node name, estimate, measurement, details, buffers, parent, and trailer stays on its `code` slide while line 5
+    is focused for the first three items, lines 6-7 for the details, line 8 for the buffers, lines 1-4 for the
+    parent, and lines 9-12 for the trailer.
 
 ## The wiki: downloaded into `runs/<id>/wiki_content/`
 
@@ -280,6 +300,8 @@ plan, and the document.
 - Mark a sentence `framing` only when it contains no technical claim.
 - Copy code, table rows, and glossary definitions exactly. A text diagram is not code: draw it with the
   `diagram` layout (rule 12).
+- When the document explains a plan, code, output, table, formula, or diagram part by part, narrate the
+  explanation over that exhibit, with each sentence's `focus` on the parts it explains (rule 14).
 - Keep all required qualifications. Give each claim the narration it needs to be clear, without padding.
 
 Save the storyboard as `runs/<id>/scratch/storyboard.json`.
