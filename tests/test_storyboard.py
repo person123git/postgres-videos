@@ -324,6 +324,23 @@ class SpeechTests(unittest.TestCase):
                 self.assertEqual(unspeakable(self.speech.speak(display)), [])
         self.assertEqual(unspeakable("see `a_b` at https://x"), ["_", "`", "https://"])
 
+    def test_spelled_letters_plurals_decades_and_digit_codes(self):
+        speech = Pronunciation({"schema": 1, "terms": {"LSN": "L S N", "JSONB": "jason B", "B-tree": "B tree",
+                                                       "40001": "four zero zero zero one"},
+                                "units": {"s": "seconds"}}, words=frozenset())
+        cases = {
+            # A spelled plural takes an apostrophe; a word plural does not.
+            "LSNs, JSONBs and B-trees": "L S N's, jason B's and B trees",
+            # A leading "A" is hyphenated so that it is not read as the article.
+            "`AM` and `AM_FLAG` and ACL": "A-M and A-M flag and A-C-L",
+            "It took 1 s, then 30s. The 1990s.": "It took 1 second, then 30 seconds. The 1990s.",
+            # Digit-only terms apply in inline code only.
+            "code `40001`, not 40001 rows": "code four zero zero zero one, not 40001 rows",
+        }
+        for display, spoken in cases.items():
+            with self.subTest(display=display):
+                self.assertEqual(speech.speak(display), spoken)
+
     def test_dictionary_is_validated(self):
         for data, message in (({"schema": 2}, "schema: 1"), ({"schema": 1, "extra": {}}, "unknown keys"),
                               ({"schema": 1, "terms": {"A": ""}}, "nonempty strings"),

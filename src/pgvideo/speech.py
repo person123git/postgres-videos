@@ -97,8 +97,9 @@ class Pronunciation:
         self.parts = {key.lower(): value for key, value in (data.get("parts") or {}).items()}
         self.abbreviations: dict[str, str] = dict(data.get("abbreviations") or {})
         self.units: dict[str, str] = dict(data.get("units") or {})
-        # Whole-term replacements in prose, longest first so `JSONB` wins over `JSON`.
-        keys = sorted(self.terms, key=len, reverse=True)
+        # Whole-term replacements in prose, longest first so `JSONB` wins over `JSON`. Digit-only terms, such as
+        # the SQLSTATE `40001`, apply only in inline code, so ordinary numbers and times keep their reading.
+        keys = sorted((key for key in self.terms if not key.isdigit()), key=len, reverse=True)
         self._terms = re.compile(r"(?<![\w$/.-])(" + "|".join(map(re.escape, keys)) + r")(s?)(?![\w$/])") \
             if keys else None
         abbreviations = sorted(self.abbreviations, key=len, reverse=True)
@@ -155,8 +156,11 @@ class Pronunciation:
         return UNSPEAKABLE.sub(" ", text)
 
     def _quantity(self, match: re.Match) -> str:
-        """Speak a number and its unit. A term that starts at the unit wins: `133 B-tree indexes` has no unit."""
+        """Speak a number and its unit. A term that starts at the unit wins: `133 B-tree indexes` has no unit.
+        A decade such as `1990s` is not a number of seconds."""
         if self._terms and self._terms.match(match.string, match.start(2)):
+            return match.group(0)
+        if match.group(2) == "s" and re.fullmatch(r"\d{3}0", match.group(1)) and match.end(1) == match.start(2):
             return match.group(0)
         return f"{match.group(1)} {self._unit(match.group(1), match.group(2))}"
 
@@ -165,15 +169,19 @@ class Pronunciation:
         return spoken.removesuffix("s") if number == "1" and spoken.endswith("s") else spoken
 
     def _term(self, term: str, plural: str) -> str:
-        return self.terms[term] + ("s" if plural else "")
+        """Speak a term and its plural. A spelled plural needs an apostrophe: Kokoro reads "L S Ns" as "L S N S"."""
+        spoken = self.terms[term]
+        if not plural:
+            return spoken
+        return spoken + ("'s" if re.search(r"(?:^|[\s-])[A-Z]$", spoken) else "s")
 
     def _capitals(self, word: str) -> str:
         """Speak an all-capital word that no term covers: spell short ones, read words and SQL keywords as words."""
         if not (word.isupper() and word.isalpha() and len(word) > 1):
             return word
         if len(word) <= 3 and not self._word(word):
-            return " ".join(word)
-        return word.lower() if set(word) & VOWELS else " ".join(word)
+            return _spell(word)
+        return word.lower() if set(word) & VOWELS else _spell(word)
 
     def _word(self, capitals: str) -> bool:
         """Whether a short capital piece is read as a word: a two-letter connective or a three-letter word."""
@@ -252,7 +260,7 @@ class Pronunciation:
         spoken = self.parts.get(extension.lower())
         if spoken:
             return spoken
-        return " ".join(extension.upper()) if len(extension) <= 2 or not set(extension) & VOWELS else extension
+        return _spell(extension.upper()) if len(extension) <= 2 or not set(extension) & VOWELS else extension
 
     def identifier(self, name: str) -> str:
         """Speak an identifier: split snake_case and CamelCase, then speak each piece."""
@@ -282,10 +290,15 @@ class Pronunciation:
         if piece.isupper() and piece in self.terms:
             return self.terms[piece]
         if not set(piece) & VOWELS or (piece.isupper() and len(piece) <= 2):
-            return " ".join(piece.upper())
+            return _spell(piece.upper())
         if piece.isupper() and len(piece) <= 3 and not self._word(piece):
-            return " ".join(piece)
+            return _spell(piece)
         return lower if piece.isupper() else piece
+
+
+def _spell(letters: str) -> str:
+    """Spell capital letters. Hyphens keep a leading "A" a letter: Kokoro reads "A M" as the article and "M"."""
+    return "-".join(letters) if letters.startswith("A") else " ".join(letters)
 
 
 def unspeakable(text: str) -> list[str]:

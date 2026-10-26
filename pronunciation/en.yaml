@@ -18,11 +18,11 @@ schema: 1
 language: a
 
 terms:
-  PostgreSQL: Post-gress
+  PostgreSQL: Post-gress Q L
   Postgres: Post-gress
   postgres: Post-gress
   psql: P-S-Q-L
-  postgresql.conf: Post-gress config
+  postgresql.conf: Post-gress Q L dot conf
   SQL: S-Q-L
   GUC: G U C
   # The plural needs its own form: Kokoro reads "G U Cs" as "G U C S".
@@ -39,8 +39,11 @@ terms:
   int4: int 4
   int8: int 8
   bigint: big int
-  # Lowercase "read committed" is read as the past tense "red".
-  read committed: Read Committed
+  # Kokoro reads "read" here as "reed"; the isolation level says "red".
+  read committed: red committed
+  Read committed: Red committed
+  Read Committed: Red Committed
+  READ COMMITTED: red committed
   VXID: V X I D
   LSN: L S N
   TID: T I D
@@ -51,11 +54,12 @@ terms:
   TOAST: toast
   HOT: hot
   JIT: jit
-  AIO: A I O
+  # A lone spelled "A" is read as the article; the hyphens keep it a letter.
+  AIO: A-I-O
   I/O: I O
   IO: I O
   CPU: C P U
-  API: A P I
+  API: A-P-I
   ASCII: ask-ee
   UTF-8: U T F 8
   JSON: jason
@@ -100,7 +104,8 @@ terms:
   PL/pgSQL: P L P G S Q L
   RelOptInfo: rel opt info
   RelOptInfos: rel opt infos
-  Relids: rel I Ds
+  # The plural needs its own form, as GUCs does.
+  Relids: rel I D's
   PlannerInfo: planner info
   PlannerGlobal: planner global
   IndexOptInfo: index opt info
@@ -119,7 +124,8 @@ terms:
   Kokoro: Kokoro
   GitHub: git hub
   contrib: con-trib
-  sysv: sys V
+  # System V is said "five".
+  sysv: sys five
   pgstat: P G stat
   pgstatindex: P G stat index
   pgstattuple: P G stat tuple
@@ -145,16 +151,17 @@ terms:
   indexrelid: index rel I D
   indrelid: ind rel I D
   btrim: B trim
-  relam: rel A M
+  relam: rel A-M
   relnamespace: rel namespace
   indcheckxmin: ind check x min
   TransactionXmin: transaction x min
-  amgettuple: A M get tuple
-  pg_am: P G A M
+  amgettuple: A-M get tuple
+  pg_am: P G A-M
   pageinspect: page inspect
   BYPASSRLS: bypass R L S
   SQLSTATE: S Q L state
-  # SQLSTATE codes are read character by character.
+  # SQLSTATE codes are read character by character. Codes of digits only apply in inline code, so that
+  # ordinary numbers and times in prose, such as "40001 rows" or "10:01", keep their reading.
   "01000": zero one zero zero zero
   "0xFF": hex F F
   # The warning class.
@@ -170,7 +177,7 @@ terms:
   XX000: X X zero zero zero
   "42809": four two eight zero nine
   "40001": four zero zero zero one
-  amcheck: A M check
+  amcheck: A-M check
   heapallindexed: heap all indexed
   rootdescend: root descend
   infomask: info mask
@@ -202,12 +209,12 @@ parts:
   pgstat: P G stat
   pgss: P G S S
   guc: G U C
-  gucs: G U Cs
+  gucs: G U C's
   wal: wall
   xlog: X log
   xact: ex-act
   xid: X I D
-  xids: X I Ds
+  xids: X I D's
   lsn: L S N
   oid: O I D
   tid: T I D
@@ -227,13 +234,13 @@ parts:
   ptr: pointer
   ctx: context
   stmt: statement
-  seq: sequential
+  seq: seek
   seqscan: sequential scan
   seqscans: sequential scans
   len: len
   cliplen: clip len
   mbcliplen: M B clip len
-  postgresql: Post-gress
+  postgresql: Post-gress Q L
   qtext: Q text
   sourcetext: source text
   fsync: F sync
@@ -242,7 +249,7 @@ parts:
   num: num
   st: S T
   io: I O
-  aio: A I O
+  aio: A-I-O
   cpu: C P U
   spi: S P I
   mvcc: M V C C
@@ -259,7 +266,7 @@ parts:
   dbid: D B I D
   queryid: query I D
   id: I D
-  ids: I Ds
+  ids: I D's
   sql: S Q L
   http: H T T P
   utf8: U T F 8
@@ -268,6 +275,7 @@ parts:
   relname: rel name
   nspname: namespace name
   relid: rel I D
+  relids: rel I D's
   idx: index
   tup: tup
   tuple: tuple
