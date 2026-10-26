@@ -68,6 +68,8 @@ terms:
   FDW: F D W
   LLVM: L L V M
   B-tree: B tree
+  # The capitalized spelling used in amcheck's error message.
+  B-Tree: B tree
   # Expand sequential-scan names, including plurals and common casing variants.
   seq scan: sequential scan
   seq scans: sequential scans
@@ -140,6 +142,9 @@ terms:
   relispartition: rel is partition
   relispopulated: rel is populated
   relkind: rel kind
+  indexrelid: index rel I D
+  indrelid: ind rel I D
+  btrim: B trim
   relam: rel A M
   relnamespace: rel namespace
   indcheckxmin: ind check x min
@@ -162,12 +167,17 @@ terms:
   58P01: five eight P zero one
   0A000: zero A zero zero zero
   XX002: X X zero zero two
+  XX000: X X zero zero zero
+  "42809": four two eight zero nine
+  "40001": four zero zero zero one
   amcheck: A M check
   heapallindexed: heap all indexed
   rootdescend: root descend
   infomask: info mask
   limitXmin: limit x min
   "17.11": 17 point 11
+  # Extension versions: "1.0" alone is read "one".
+  "1.0": one point zero
   userid: user I D
   reindex-conc-index-built: reindex concurrent index built
   PROC_IN_SAFE_IC: proc in safe I C
